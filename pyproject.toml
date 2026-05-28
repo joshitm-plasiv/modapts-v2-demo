@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modapts"
+version = "2.0.0"
+description = "MODAPTS V2 Classifier — LLM-powered motion classification engine"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.30"]
+openai = ["openai>=1.30"]
+mistral = ["mistralai>=0.4"]
+all = ["anthropic>=0.30", "openai>=1.30", "mistralai>=0.4"]
+dev = ["pytest>=8.0"]
