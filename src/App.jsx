@@ -5,6 +5,7 @@ import ResultsTable from './components/ResultsTable'
 
 const STORAGE_KEY_CORRECTIONS = 'modapts_corrections'
 const STORAGE_KEY_ACCEPTED = 'modapts_accepted'
+const STORAGE_KEY_RESULTS = 'modapts_results'
 
 function loadFromStorage(key) {
   try {
@@ -18,16 +19,25 @@ function saveToStorage(key, data) {
 }
 
 function resultsReducer(state, action) {
+  let next
   switch (action.type) {
     case 'add':
-      return [{ id: Date.now(), input: action.input, result: action.result, expanded: true }, ...state]
+      next = [{ id: Date.now(), input: action.input, result: action.result, expanded: true }, ...state]
+      break
     case 'toggle':
-      return state.map(r => r.id === action.id ? { ...r, expanded: !r.expanded } : r)
+      next = state.map(r => r.id === action.id ? { ...r, expanded: !r.expanded } : r)
+      break
     case 'update_result':
-      return state.map(r => r.id === action.id ? { ...r, result: action.result } : r)
+      next = state.map(r => r.id === action.id ? { ...r, result: action.result } : r)
+      break
+    case 'clear':
+      next = []
+      break
     default:
       return state
   }
+  saveToStorage(STORAGE_KEY_RESULTS, next)
+  return next
 }
 
 export default function App() {
@@ -37,7 +47,7 @@ export default function App() {
     apiKey: '',
   })
   const [showSettings, setShowSettings] = useState(true)
-  const [results, dispatch] = useReducer(resultsReducer, [])
+  const [results, dispatch] = useReducer(resultsReducer, [], () => loadFromStorage(STORAGE_KEY_RESULTS))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
@@ -192,6 +202,14 @@ export default function App() {
       <header className="header">
         <h1>MODAPTS<span>/v2</span></h1>
         <div className="header-right">
+          {results.length > 0 && (
+            <button
+              className="settings-toggle"
+              onClick={() => { if (confirm('Clear all classification history?')) dispatch({ type: 'clear' }) }}
+            >
+              Clear history
+            </button>
+          )}
           {corrections.length > 0 && (
             <span className="corrections-badge">{corrections.length} correction{corrections.length !== 1 ? 's' : ''}</span>
           )}
