@@ -160,6 +160,33 @@ export default function App() {
     saveToStorage(STORAGE_KEY_ACCEPTED, [...accepted, record])
   }, [])
 
+  // Sensing-ambiguity resolution: re-classify with the operator's answer.
+  const resolveClarification = useCallback(async (resultId, originalInput, question, answer) => {
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: originalInput,
+          provider: settings.provider,
+          model: settings.model,
+          api_key: settings.apiKey,
+          corrections,
+          clarification: { question, answer },
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      dispatch({ type: 'update_result', id: resultId, result: data })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [settings, corrections])
+
   return (
     <>
       <header className="header">
@@ -193,6 +220,7 @@ export default function App() {
         onCodeEditComplete={completeCodeEdit}
         onReinterpret={submitReinterpret}
         onAccept={acceptResult}
+        onResolveClarification={resolveClarification}
       />
     </>
   )
