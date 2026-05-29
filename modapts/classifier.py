@@ -2,7 +2,10 @@
 Module 2 — Classifier (LLM Call 1)
 
 Converts operator free text into MODAPTS codes and standard time.
-Single LLM call per input. Two-step reasoning inside the response.
+Single LLM call per input. Reasoning steps inside the response.
+
+Step 0 (Instruction 6): detect sensing ambiguity → request clarification.
+Step 1: extract actions. Step 2: decompose and code.
 
 Pipeline: assemble prompt → call LLM → parse → validate → compute time → return.
 """
@@ -58,12 +61,30 @@ Multi-action inputs split at conjunctions ("and," "then") and commas. Each segme
 Instruction 5 — Task-level decomposition:
 When the operator describes a task rather than a motion (e.g., "assemble the PCB"), first extract the implied sub-actions, then code each. Separate codeable actions from non-action observations. Show the extracted actions in the interpreted_action field.
 
+Instruction 6 — Sensing ambiguity detection.
+Before coding, check each interpreted action against this rule:
+  (a) Does the action depend on a PROPERTY the operator must determine?
+  (b) Can the default motion for that action actually sense that property?
+If (a) is yes AND (b) is no, the action is sensing-ambiguous. Do NOT fabricate a sensing motion (e.g. do not assume the operator can SEE temperature). Instead, emit a clarifying question and do not code the affected action until it is answered.
+
+Sensing-dependent properties (representative, not exhaustive):
+  Temperature — "if hot," "if cold," "when warm". Sight cannot determine thermal state unless a cue exists. Sensing: touch (M + G0) · instrument reading (R2/R3) · visible cue such as steam/glow/indicator (E2).
+  Weight — "if heavy," "if light". Mass is not visible. Sensing: lift to test (M + G1 + L?) · label/spec (R2/R3).
+  Fill level — "if full," "if empty". Opaque containers hide contents. Sensing: look if transparent or has a gauge (E2) · lift or shake (M + G1).
+  Integrity — "if cracked," "if damaged," "if broken". Fine defects are not always visible. Sensing: close inspection (E2, or E4 + E2) · touch (M + G0).
+  Material/type — "if metal," "the right part," "the correct one". Identity is not always visually distinct. Sensing: read label (R2/R3) · inspect (E2).
+  State/status — "if ready," "if done," "if on". Internal or process state is hidden. Sensing: read indicator (R2/R3) · look (E2).
+
+When the operator later answers a clarifying question in natural language, interpret their answer to select the sensing method above, code that method, then continue coding the rest of the action normally. Do not ask a second clarifying question for the same action.
+
 ## RESPONSE_FORMAT
 
 Respond with ONLY a JSON object, no markdown fences, no preamble. Follow this exact schema:
 
 {{
   "interpreted_action": "<what you understood the operator meant, semicolon-separated if multiple actions>",
+  "needs_clarification": <true if any action is sensing-ambiguous (Instruction 6), else false>,
+  "clarifying_question": "<if needs_clarification is true: one natural-language question naming the property and plausible sensing methods; else null>",
   "steps": [
     {{
       "motion": "<natural language description of one atomic motion>",
@@ -74,8 +95,9 @@ Respond with ONLY a JSON object, no markdown fences, no preamble. Follow this ex
   ]
 }}
 
-Step 1: Read the operator input. Extract the codeable action(s). Write them in the interpreted_action field.
-Step 2: Decompose each action into atomic motions using the 4 rules. Assign codes using the 5 instructions. Output each as a step.
+Step 0: Apply Instruction 6. If any action is sensing-ambiguous, set needs_clarification=true, write the clarifying_question, leave steps empty ([]), and stop.
+Step 1: Otherwise, read the operator input. Extract the codeable action(s). Write them in the interpreted_action field.
+Step 2: Decompose each action into atomic motions using the 4 rules. Assign codes using the instructions. Output each as a step.
 """
 
 
@@ -119,6 +141,7 @@ def classify(
     corrections: Optional[list[dict[str, Any]]] = None,
     config: Optional[AdapterConfig] = None,
     max_retries: int = 1,
+    clarification: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """
     Full Module 2 pipeline.
@@ -135,20 +158,36 @@ def classify(
         corrections: override correction list (default: load from storage)
         config: LLM adapter config (default: from env)
         max_retries: number of retries on parse failure (default: 1)
+        clarification: optional {"question": ..., "answer": ...} from a prior
+            sensing-ambiguity round. When present, it is appended to the user
+            message so the LLM resolves the sensing method and codes normally.
 
     Returns:
-        Validated result dict with interpreted_action, steps, code_sequence,
-        total_mods, total_seconds.
+        Validated result dict. Either a coded result (interpreted_action, steps,
+        code_sequence, total_mods, total_seconds) or a clarification request
+        (needs_clarification=true, clarifying_question set, steps empty).
 
     Raises:
         ValidationError: unrecoverable LLM response after retries
         AdapterAPIError: LLM call failed
     """
     system_prompt = assemble_prompt(corrections)
-    last_error = None
 
+    user_message = operator_input
+    if clarification:
+        q = clarification.get("question", "")
+        a = clarification.get("answer", "")
+        user_message = (
+            f"{operator_input}\n\n"
+            f"Clarification already provided — do not ask again:\n"
+            f"Q: {q}\n"
+            f"A: {a}\n"
+            f"Use this answer to resolve the sensing method and code the action."
+        )
+
+    last_error = None
     for attempt in range(1 + max_retries):
-        raw = call_llm(system_prompt, operator_input, config)
+        raw = call_llm(system_prompt, user_message, config)
         try:
             result = validate(raw)
             result["raw_response"] = raw

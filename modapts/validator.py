@@ -54,7 +54,9 @@ def parse_response(raw: str) -> dict[str, Any]:
     if not isinstance(data["steps"], list):
         raise ValidationError("'steps' field is not an array")
 
-    if len(data["steps"]) == 0:
+    # Empty steps are valid ONLY when the LLM is requesting clarification
+    # (sensing ambiguity, Instruction 6). Otherwise it means no motions found.
+    if len(data["steps"]) == 0 and not data.get("needs_clarification"):
         raise ValidationError("No motions identified in input")
 
     return data
@@ -124,8 +126,23 @@ def validate(raw: str) -> dict[str, Any]:
     Input: raw LLM response string.
     Output: validated result dict ready for the UI.
     Raises ValidationError if response is unrecoverable.
+
+    If the LLM requested clarification (sensing ambiguity, Instruction 6),
+    returns a clarification request with empty steps instead of coding.
     """
     data = parse_response(raw)
+
+    # Clarification request: no coding, surface the question.
+    if data.get("needs_clarification"):
+        return {
+            "interpreted_action": data.get("interpreted_action", ""),
+            "needs_clarification": True,
+            "clarifying_question": data.get("clarifying_question", ""),
+            "steps": [],
+            "code_sequence": "",
+            "total_mods": 0,
+            "total_seconds": 0.0,
+        }
 
     validated_steps = [validate_step(s) for s in data["steps"]]
     total_mods, total_seconds = compute_time(validated_steps)
@@ -133,6 +150,8 @@ def validate(raw: str) -> dict[str, Any]:
 
     return {
         "interpreted_action": data.get("interpreted_action", ""),
+        "needs_clarification": False,
+        "clarifying_question": None,
         "steps": validated_steps,
         "code_sequence": code_sequence,
         "total_mods": total_mods,
