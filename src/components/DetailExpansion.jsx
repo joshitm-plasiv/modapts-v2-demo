@@ -22,10 +22,13 @@ const ALL_CODES = [
   'H4','H5','H6','H7','H21','H26','H35',
 ]
 
-export default function DetailExpansion({ resultId, input, result, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept }) {
+export default function DetailExpansion({ resultId, input, result, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification }) {
   // Interpretation editing (Path B)
   const [editingInterp, setEditingInterp] = useState(false)
   const [interpText, setInterpText] = useState(result.interpreted_action)
+
+  // Sensing-ambiguity clarification (Instruction 6)
+  const [clarifyResponse, setClarifyResponse] = useState('')
 
   // Code editing (Path A)
   const [editingStep, setEditingStep] = useState(null) // step index
@@ -102,6 +105,42 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
       clarifyAnswer
     )
     cancelCodeEdit()
+  }
+
+  // ── Sensing-ambiguity clarification view ──
+  // When the LLM requested clarification, show only the question + answer box.
+  if (result.needs_clarification) {
+    return (
+      <div className="detail-panel">
+        <div className="feedback-inline" style={{ marginTop: 0 }}>
+          <label>Clarification needed before coding</label>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 10px' }}>
+            {result.clarifying_question}
+          </p>
+          <input
+            type="text"
+            value={clarifyResponse}
+            onChange={e => setClarifyResponse(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && clarifyResponse.trim()) {
+                onResolveClarification(resultId, input, result.clarifying_question, clarifyResponse.trim())
+              }
+            }}
+            placeholder="Answer in your own words… e.g. 'I touch it to check' or 'there's a temperature gauge'"
+            autoFocus
+          />
+          <div className="feedback-actions">
+            <button
+              className="btn-sm primary"
+              onClick={() => onResolveClarification(resultId, input, result.clarifying_question, clarifyResponse.trim())}
+              disabled={!clarifyResponse.trim()}
+            >
+              Submit answer
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
