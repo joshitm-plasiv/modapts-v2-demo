@@ -42,10 +42,16 @@ class handler(BaseHTTPRequestHandler):
             return self._error(400, "Missing 'provider', 'model', or 'api_key'")
 
         corrections = body.get("corrections", [])
+        clarification = body.get("clarification")  # optional {question, answer}
 
         try:
             config = AdapterConfig(provider=provider, model=model, api_key=api_key)
-            result = classify(operator_input, corrections=corrections, config=config)
+            result = classify(
+                operator_input,
+                corrections=corrections,
+                config=config,
+                clarification=clarification,
+            )
             result.pop("raw_response", None)
             return self._json(200, result)
         except ValidationError as e:
