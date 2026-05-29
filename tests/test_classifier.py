@@ -14,8 +14,14 @@ class TestClassifierPrompt:
             assert f"Rule {i}" in SYSTEM_PROMPT_BASE
 
     def test_base_contains_all_instructions(self):
-        for i in range(1, 6):
+        for i in range(1, 7):
             assert f"Instruction {i}" in SYSTEM_PROMPT_BASE
+
+    def test_base_contains_ambiguity_detection(self):
+        assert "sensing-ambiguous" in SYSTEM_PROMPT_BASE
+        assert "Temperature" in SYSTEM_PROMPT_BASE
+        assert "needs_clarification" in SYSTEM_PROMPT_BASE
+        assert "clarifying_question" in SYSTEM_PROMPT_BASE
 
     def test_base_contains_response_format(self):
         assert "RESPONSE_FORMAT" in SYSTEM_PROMPT_BASE

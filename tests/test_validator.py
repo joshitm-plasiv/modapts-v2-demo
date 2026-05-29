@@ -71,6 +71,25 @@ class TestValidator:
         assert result["code_sequence"] == "M2 + G0"
         assert result["total_mods"] == 2
         assert result["total_seconds"] == 0.258
+        assert result["needs_clarification"] is False
+
+    def test_clarification_request(self):
+        raw = json.dumps({
+            "interpreted_action": "inspect packet to decide if hot; pick up",
+            "needs_clarification": True,
+            "clarifying_question": "How is 'hot' determined — touch, instrument, or visible cue?",
+            "steps": []
+        })
+        result = validate(raw)
+        assert result["needs_clarification"] is True
+        assert "hot" in result["clarifying_question"]
+        assert result["steps"] == []
+        assert result["code_sequence"] == ""
+
+    def test_empty_steps_without_clarification_raises(self):
+        raw = json.dumps({"interpreted_action": "x", "steps": []})
+        with pytest.raises(ValidationError, match="No motions"):
+            validate(raw)
 
     def test_validate_with_fences(self):
         inner = json.dumps({"interpreted_action": "x", "steps": [{"motion": "a", "code": "M1", "mods": 1, "assumption": None}]})
