@@ -1,0 +1,86 @@
+"""
+Interpreter — the LLM step: free text -> InterpretedAction (neutral facts).
+
+The LLM emits NeutralEvent facts only (never codes or numbers), marks which
+fields were inferred vs. stated, and flags sensing dependencies. Deterministic
+engines then derive codes/time. See spec sections 2-3, 7.
+"""
+from __future__ import annotations
+import json
+from typing import Optional
+
+from modapts.core.neutral import InterpretedAction
+from modapts.adapter import AdapterConfig, call_llm
+from modapts.validator import strip_markdown_fences
+
+
+def build_system_prompt() -> str:
+    return """You convert a free-text description of manual work into NEUTRAL physical facts.
+Output FACTS ONLY — never MODAPTS/MTM/MOST codes, never time values. A separate
+deterministic engine assigns codes from your facts.
+
+Decompose the task into atomic physical events. For each event emit an object with
+these fields (omit a field or use the null/"n/a"/"none" default when the text does
+not support a value — do NOT invent values):
+
+  event_type: one of acquire | place | move | use_tool | operate_device |
+              motion_cycle | body_motion | inspect | process_wait
+  object: short noun
+  object_size: tiny | small | medium | large            (optional)
+  dims_cm: [l, w, h] in cm                               (optional)
+  object_weight_kg: number                                (omit if unknown)
+  source_state: by_itself | jumbled | nested | handful | n/a   (for acquire)
+  distance_cm: number                                     (omit if unstated)
+  motion_path: free_air | in_contact | restricted | n/a   (for move)
+  placement_accuracy: approximate | loose | tight | n/a   (for place; clearance/fit)
+  clearance_mm / tolerance_mm: number                     (optional)
+  symmetry: S | SS | NS | n/a
+  force: none | apply_pressure | extra_force
+  tool: string                                            (for use_tool)
+  process_time_s: number                                  (for process_wait)
+  revolutions / rot_diameter_cm: number                   (for cranks/turns)
+  body: none | walk_paces:N | bend | stoop | kneel | sit_stand
+  repetition: integer (default 1)
+  two_handed: boolean
+  sensing_dependency: none | temperature | weight | fill | integrity | material | state
+  inferred_fields: list of field names whose value you INFERRED rather than read
+                   from the text (be honest — this drives ambiguity flagging)
+  assumption: short note, or null
+
+If an action depends on a property the operator must determine but a default motion
+cannot sense (e.g. "if hot"), set sensing_dependency and leave the dependent coding
+to clarification — do not fabricate a sensing motion.
+
+Respond with ONLY this JSON, no markdown fences, no prose:
+{
+  "interpreted_action": "<plain-language summary; semicolon-separated if multiple>",
+  "events": [ { ...fields above... } ]
+}"""
+
+
+SYSTEM_PROMPT = build_system_prompt()
+
+
+def parse_response(raw: str) -> InterpretedAction:
+    """Parse the LLM JSON into an InterpretedAction. Raises ValueError on bad JSON."""
+    cleaned = strip_markdown_fences(raw)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Interpreter returned malformed JSON: {e}")
+    if not isinstance(data, dict) or "events" not in data:
+        raise ValueError("Interpreter JSON missing 'events'")
+    return InterpretedAction.from_dict(data)
+
+
+def interpret(text: str, config: Optional[AdapterConfig] = None,
+              max_retries: int = 1) -> InterpretedAction:
+    """text -> NeutralEvent facts via the LLM, with one retry on parse failure."""
+    last = None
+    for _ in range(1 + max_retries):
+        raw = call_llm(SYSTEM_PROMPT, text, config)
+        try:
+            return parse_response(raw)
+        except ValueError as e:
+            last = e
+    raise ValueError(f"Interpreter failed after retries: {last}")
