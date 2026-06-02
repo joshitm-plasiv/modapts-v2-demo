@@ -33,12 +33,10 @@ InterpretFn = Callable[[str, Optional[dict]], InterpretedAction]
 
 
 def _llm_interpret(text: str, config: Optional[dict] = None) -> InterpretedAction:
-    """text -> neutral facts via the LLM. Wired in Step 2 (prompt + adapter).
-    Kept injectable so the pipeline can be exercised before then."""
-    raise NotImplementedError(
-        "LLM interpretation is wired in Step 2 (prompt -> NeutralEvent[]). "
-        "Pass interpret_fn=... to exercise the pipeline before then."
-    )
+    """text -> neutral facts via the LLM. Lazy import keeps orchestrator import
+    light and decoupled from the adapter/interpreter; still injectable via interpret_fn."""
+    from modapts.interpreter import interpret
+    return interpret(text, config)
 
 
 # ── Clarification gate (deterministic) ─────────────────────────────────────────
