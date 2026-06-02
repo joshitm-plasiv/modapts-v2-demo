@@ -1,171 +1,114 @@
 """
-Module 3 — Feedback Loop (LLM Call 2)
+Vercel Serverless Function — /api/feedback
 
-Two feedback paths:
-  Path A: Code edit → Call 2 (clarifying question) → store correction
-  Path B: Interpretation edit → re-run Module 2 Step 2 → store correction
+Handles both feedback paths:
+  POST /api/feedback?path=code_edit    → Call 2 (clarifying question) [MODAPTS only, for now]
+  POST /api/feedback?path=reinterpret  → Re-run with corrected interpretation
 
-Corrections feed back into Module 2 system prompt as few-shot examples.
+Reinterpret routes by `standard`: MODAPTS -> legacy classifier; engines -> V3 orchestrator.
 """
 
 import json
-from typing import Any, Optional
+import sys
+import os
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
-from modapts.adapter import AdapterConfig, AdapterAPIError, call_llm
-from modapts.classifier import classify
-from modapts.storage import save_code_edit, save_interpretation_edit
-from modapts.validator import strip_markdown_fences
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-# ── Call 2 System Prompt ────────────────────────────────────────────────────
-
-FEEDBACK_PROMPT = """You are a MODAPTS feedback analyzer. Your role is to ask ONE clarifying question about an operator's correction to a MODAPTS code classification.
-
-## DECOMPOSITION_RULES
-
-Rule 1 — Move + Terminal pairing:
-Every object interaction requires a Movement code (M1–M5, M7) preceding a Terminal code (G0/G1/G3 for pickup, P0/P2/P5 for placement).
-
-Rule 2 — Repetition multiplies:
-When an action repeats, the entire code sequence repeats. Each repetition is independent.
-
-Rule 3 — E2 precedes high conscious control:
-E2 occurs before G3, P2, or P5. Not before G0, G1, P0.
-
-Rule 4 — One motion, one code:
-Each atomic motion = exactly one MODAPTS code. No composites.
-
-## YOUR TASK
-
-The operator corrected a MODAPTS code. You will receive:
-- The original operator input
-- The original code and the corrected code
-- The operator's reason for the correction
-
-Ask ONE clarifying question to better understand why the correction was needed. Choose from EXACTLY these four categories:
-
-1. object_size — About the physical size of the object involved
-2. object_arrangement — About how items are organized (tray, pile, bin, rack)
-3. reach_distance — About how far the operator reaches
-4. weight — About the weight of the object
-
-Pick the single most relevant category based on the correction.
-
-## RESPONSE_FORMAT
-
-Respond with ONLY a JSON object, no markdown fences, no preamble:
-
-{
-  "clarifying_category": "<one of: object_size, object_arrangement, reach_distance, weight>",
-  "clarifying_question": "<one specific question>"
-}
-"""
-
-VALID_CATEGORIES = {"object_size", "object_arrangement", "reach_distance", "weight"}
+from modapts.adapter import AdapterConfig, AdapterError
+from modapts.feedback import analyze_code_edit
+from modapts.classifier import classify as legacy_classify
+from modapts.validator import ValidationError
+from _v3 import run_v3, is_legacy, DEFAULT_STANDARD
 
 
-# ── Path A: Code Edit ───────────────────────────────────────────────────────
+class handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self._cors_headers()
+        self.end_headers()
 
-def analyze_code_edit(
-    original_input: str,
-    original_code: str,
-    corrected_code: str,
-    why: str,
-    config: Optional[AdapterConfig] = None,
-) -> dict[str, Any]:
-    """
-    Path A, phase 1: Call 2 fires to get a clarifying question.
+    def do_POST(self):
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        except (json.JSONDecodeError, ValueError):
+            return self._error(400, "Invalid JSON body")
 
-    Returns dict with clarifying_category and clarifying_question,
-    or empty strings if Call 2 fails or returns invalid category.
-    """
-    if not why:
-        # No why text → no Call 2, return empty clarification
-        return {
-            "clarifying_category": "",
-            "clarifying_question": "",
-        }
+        query = parse_qs(urlparse(self.path).query)
+        path_type = query.get("path", [""])[0]
 
-    user_message = (
-        f"Original input: \"{original_input}\"\n"
-        f"Original code: {original_code}\n"
-        f"Corrected code: {corrected_code}\n"
-        f"Operator's reason: {why}"
-    )
+        provider = body.get("provider", "").strip().lower()
+        model = body.get("model", "").strip()
+        api_key = body.get("api_key", "").strip()
+        if not provider or not model or not api_key:
+            return self._error(400, "Missing 'provider', 'model', or 'api_key'")
 
-    try:
-        raw = call_llm(FEEDBACK_PROMPT, user_message, config)
-        cleaned = strip_markdown_fences(raw)
-        data = json.loads(cleaned)
+        config = AdapterConfig(provider=provider, model=model, api_key=api_key)
 
-        category = data.get("clarifying_category", "")
-        question = data.get("clarifying_question", "")
+        if path_type == "code_edit":
+            return self._handle_code_edit(body, config)
+        elif path_type == "reinterpret":
+            return self._handle_reinterpret(body, config)
+        else:
+            return self._error(400, "Query param 'path' must be 'code_edit' or 'reinterpret'")
 
-        # Validate category
-        if category not in VALID_CATEGORIES:
-            return {"clarifying_category": "", "clarifying_question": ""}
+    def _handle_code_edit(self, body, config):
+        """Path A: Call 2 — get clarifying question. (MODAPTS code-edit learning.)"""
+        required = ["original_input", "original_code", "corrected_code", "why"]
+        for field in required:
+            if not body.get(field):
+                return self._error(400, f"Missing '{field}'")
+        try:
+            result = analyze_code_edit(
+                original_input=body["original_input"],
+                original_code=body["original_code"],
+                corrected_code=body["corrected_code"],
+                why=body["why"],
+                config=config,
+            )
+            return self._json(200, result)
+        except AdapterError as e:
+            return self._error(502, f"LLM error: {e}")
+        except Exception as e:
+            return self._error(500, f"Internal error: {e}")
 
-        return {
-            "clarifying_category": category,
-            "clarifying_question": question,
-        }
+    def _handle_reinterpret(self, body, config):
+        """Path B: Re-run with corrected interpretation (standard-aware)."""
+        corrected = body.get("corrected_interpretation", "").strip()
+        if not corrected:
+            return self._error(400, "Missing 'corrected_interpretation'")
 
-    except (json.JSONDecodeError, AdapterAPIError, Exception):
-        # Call 2 failure: store correction without clarification
-        return {"clarifying_category": "", "clarifying_question": ""}
+        standard = body.get("standard", DEFAULT_STANDARD).strip() or DEFAULT_STANDARD
+        corrections = body.get("corrections", [])
 
+        try:
+            if is_legacy(standard):
+                result = legacy_classify(corrected, corrections=corrections, config=config)
+                result.pop("raw_response", None)
+                result.setdefault("standard", "MODAPTS")
+                return self._json(200, result)
+            return self._json(200, run_v3(corrected, standard, config, body))
+        except ValidationError as e:
+            return self._error(422, f"Classification failed: {e}")
+        except AdapterError as e:
+            return self._error(502, f"LLM error: {e}")
+        except ValueError as e:
+            return self._error(400, str(e))
+        except Exception as e:
+            return self._error(500, f"Internal error: {e}")
 
-def complete_code_edit(
-    original_input: str,
-    original_code: str,
-    corrected_code: str,
-    why: str,
-    clarifying_category: str,
-    clarifying_question: str,
-    operator_answer: str,
-) -> dict[str, Any]:
-    """
-    Path A, phase 2: After operator answers the clarifying question.
-    Stores the full correction record.
-    """
-    return save_code_edit(
-        original_input=original_input,
-        original_code=original_code,
-        corrected_code=corrected_code,
-        why=why,
-        clarifying_category=clarifying_category or None,
-        clarifying_question=clarifying_question or None,
-        operator_answer=operator_answer or None,
-    )
+    def _json(self, status, data):
+        self.send_response(status)
+        self._cors_headers()
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode("utf-8"))
 
+    def _error(self, status, message):
+        self._json(status, {"error": message})
 
-# ── Path B: Interpretation Edit ─────────────────────────────────────────────
-
-def reinterpret(
-    original_input: str,
-    original_interpretation: str,
-    corrected_interpretation: str,
-    config: Optional[AdapterConfig] = None,
-) -> dict[str, Any]:
-    """
-    Path B: No Call 2. Re-run Module 2 with corrected interpretation.
-    Stores the correction record and returns the new classification result.
-
-    Returns dict with:
-      - correction: the stored correction record
-      - result: new Module 2 output from the corrected interpretation
-    """
-    # Store the interpretation correction
-    correction = save_interpretation_edit(
-        original_input=original_input,
-        original_interpretation=original_interpretation,
-        corrected_interpretation=corrected_interpretation,
-    )
-
-    # Re-run full Module 2 pipeline with corrected interpretation as input
-    result = classify(corrected_interpretation, config=config)
-
-    return {
-        "correction": correction,
-        "result": result,
-    }
+    def _cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")

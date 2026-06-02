@@ -2,8 +2,10 @@
 Vercel Serverless Function — /api/feedback
 
 Handles both feedback paths:
-  POST /api/feedback?path=code_edit    → Call 2 (clarifying question)
-  POST /api/feedback?path=reinterpret  → Re-run Module 2 with corrected interpretation
+  POST /api/feedback?path=code_edit    → Call 2 (clarifying question) [MODAPTS only, for now]
+  POST /api/feedback?path=reinterpret  → Re-run with corrected interpretation
+
+Reinterpret routes by `standard`: MODAPTS -> legacy classifier; engines -> V3 orchestrator.
 """
 
 import json
@@ -16,8 +18,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modapts.adapter import AdapterConfig, AdapterError
 from modapts.feedback import analyze_code_edit
-from modapts.classifier import classify
+from modapts.classifier import classify as legacy_classify
 from modapts.validator import ValidationError
+from _v3 import run_v3, is_legacy, DEFAULT_STANDARD
 
 
 class handler(BaseHTTPRequestHandler):
@@ -38,7 +41,6 @@ class handler(BaseHTTPRequestHandler):
         provider = body.get("provider", "").strip().lower()
         model = body.get("model", "").strip()
         api_key = body.get("api_key", "").strip()
-
         if not provider or not model or not api_key:
             return self._error(400, "Missing 'provider', 'model', or 'api_key'")
 
@@ -52,12 +54,11 @@ class handler(BaseHTTPRequestHandler):
             return self._error(400, "Query param 'path' must be 'code_edit' or 'reinterpret'")
 
     def _handle_code_edit(self, body, config):
-        """Path A: Call 2 — get clarifying question."""
+        """Path A: Call 2 — get clarifying question. (MODAPTS code-edit learning.)"""
         required = ["original_input", "original_code", "corrected_code", "why"]
         for field in required:
             if not body.get(field):
                 return self._error(400, f"Missing '{field}'")
-
         try:
             result = analyze_code_edit(
                 original_input=body["original_input"],
@@ -73,21 +74,27 @@ class handler(BaseHTTPRequestHandler):
             return self._error(500, f"Internal error: {e}")
 
     def _handle_reinterpret(self, body, config):
-        """Path B: Re-run Module 2 with corrected interpretation."""
+        """Path B: Re-run with corrected interpretation (standard-aware)."""
         corrected = body.get("corrected_interpretation", "").strip()
         if not corrected:
             return self._error(400, "Missing 'corrected_interpretation'")
 
+        standard = body.get("standard", DEFAULT_STANDARD).strip() or DEFAULT_STANDARD
         corrections = body.get("corrections", [])
 
         try:
-            result = classify(corrected, corrections=corrections, config=config)
-            result.pop("raw_response", None)
-            return self._json(200, result)
+            if is_legacy(standard):
+                result = legacy_classify(corrected, corrections=corrections, config=config)
+                result.pop("raw_response", None)
+                result.setdefault("standard", "MODAPTS")
+                return self._json(200, result)
+            return self._json(200, run_v3(corrected, standard, config, body))
         except ValidationError as e:
             return self._error(422, f"Classification failed: {e}")
         except AdapterError as e:
             return self._error(502, f"LLM error: {e}")
+        except ValueError as e:
+            return self._error(400, str(e))
         except Exception as e:
             return self._error(500, f"Internal error: {e}")
 
