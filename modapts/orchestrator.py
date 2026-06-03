@@ -100,6 +100,29 @@ def pending_clarifications(text: str, action: InterpretedAction) -> list[str]:
 
 
 # ── Public pipeline ────────────────────────────────────────────────────────────
+# Single shared default distance (cm) for motion events the interpreter left unset.
+# Applied ONCE here so every engine inherits the SAME value — prevents the per-engine
+# default divergence that inflated cross-standard spread. Flagged as an assumption.
+# (Upgrade path: replace this constant with workcell zone distances.)
+DEFAULT_DISTANCE_CM = 30.0
+_MOTION_EVENTS = ("acquire", "place", "move")
+
+
+def _fill_distance_backstop(action: "InterpretedAction"):
+    """Fill distance_cm on motion events that have none, with one shared default.
+    Deterministic backstop independent of LLM behavior. Returns the same action
+    (events patched in place); marks the fill in the event assumption + inferred_fields."""
+    for ev in action.events:
+        et = ev.event_type.value if hasattr(ev.event_type, "value") else ev.event_type
+        if et in _MOTION_EVENTS and ev.distance_cm is None:
+            ev.distance_cm = DEFAULT_DISTANCE_CM
+            if "distance_cm" not in ev.inferred_fields:
+                ev.inferred_fields.append("distance_cm")
+            note = f"distance not specified; backstop default {int(DEFAULT_DISTANCE_CM)}cm (shared across standards)"
+            ev.assumption = note if not ev.assumption else f"{ev.assumption}; {note}"
+    return action
+
+
 def _apply_fact_overrides(action: "InterpretedAction", overrides: Optional[list[dict]]):
     """Patch event fields with operator corrections (deterministic — no LLM).
     `overrides` is a list aligned to event index, each a dict of {field: value} for
@@ -157,7 +180,7 @@ def classify(text: str, standard: str, config: Optional[dict] = None,
         )
 
     interpret = interpret_fn or _llm_interpret
-    action = _apply_fact_overrides(interpret(text, config), fact_overrides)
+    action = _apply_fact_overrides(_fill_distance_backstop(interpret(text, config)), fact_overrides)
 
     questions = pending_clarifications(text, action)
     if questions:
@@ -177,7 +200,7 @@ def classify_all(text: str, config: Optional[dict] = None,
     section 10). If the interpretation is un-decomposable / ambiguous, every engine
     returns the SAME clarification request (no fabricated codes)."""
     interpret = interpret_fn or _llm_interpret
-    action = _apply_fact_overrides(interpret(text, config), fact_overrides)
+    action = _apply_fact_overrides(_fill_distance_backstop(interpret(text, config)), fact_overrides)
 
     questions = pending_clarifications(text, action)
     out: dict[str, EngineResult] = {}
@@ -190,3 +213,74 @@ def classify_all(text: str, config: Optional[dict] = None,
             r.interpreted_action = action.interpreted_action
             out[std] = r
     return out
+
+
+def classify_sweep(text: str, event_index: int, field: str, values: list,
+                   config: Optional[dict] = None, workcell: Optional[WorkcellModel] = None,
+                   interpret_fn: Optional[InterpretFn] = None,
+                   base_overrides: Optional[list[dict]] = None) -> dict:
+    """Sensitivity sweep: interpret the task ONCE, then for each value re-derive all
+    engines with that value patched onto `event_index`.`field`. One LLM call total, so
+    every row shares the same interpretation — the only thing changing is the swept fact.
+
+    Returns: {interpreted_action, needs_clarification, clarifying_questions, event_index,
+              field, rows: [{value, results: [EngineResult dicts]}]}."""
+    interpret = interpret_fn or _llm_interpret
+    action = _fill_distance_backstop(interpret(text, config))
+
+    # If the task itself can't be decomposed, sweeping is meaningless — surface once.
+    questions = pending_clarifications(text, action)
+    if questions:
+        return {
+            "interpreted_action": action.interpreted_action,
+            "needs_clarification": True,
+            "clarifying_questions": questions,
+            "event_index": event_index, "field": field, "rows": [],
+        }
+
+    # Baseline: the value the swept fact already had in the (un-swept) interpretation.
+    # Operator can read every swept value against the original assumption.
+    base_ev = action.events[event_index] if 0 <= event_index < len(action.events) else None
+    baseline_val = getattr(base_ev, field, None) if base_ev is not None else None
+    if hasattr(baseline_val, "value"):          # enum -> its string
+        baseline_val = baseline_val.value
+
+    # Build the full value list: baseline first (deduped), then the operator's values.
+    def _norm(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return x
+    sweep_values = list(values)
+    if baseline_val is not None and not any(_norm(v) == _norm(baseline_val) for v in sweep_values):
+        sweep_values = [baseline_val] + sweep_values
+
+    rows = []
+    for v in sweep_values:
+        overrides = [dict(o) if o else None for o in (base_overrides or [])]
+        while len(overrides) <= event_index:
+            overrides.append(None)
+        patch = dict(overrides[event_index] or {})
+        patch[field] = v
+        overrides[event_index] = patch
+
+        patched = _apply_fact_overrides(action, overrides)
+        results = []
+        for std, engine in ENGINE_REGISTRY.items():
+            r = engine.assemble(patched.events, workcell)
+            r.interpreted_action = patched.interpreted_action
+            results.append(r)
+        results.sort(key=lambda r: r.total_seconds)
+        is_baseline = baseline_val is not None and _norm(v) == _norm(baseline_val)
+        rows.append({"value": v, "baseline": is_baseline,
+                     "results": [r.to_dict() for r in results]})
+
+    return {
+        "interpreted_action": action.interpreted_action,
+        "needs_clarification": False,
+        "clarifying_questions": [],
+        "event_index": event_index,
+        "field": field,
+        "baseline_value": baseline_val,
+        "rows": rows,
+    }
