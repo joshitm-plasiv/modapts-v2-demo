@@ -45,7 +45,8 @@ def _workcell_from(body):
 def _run_v3(text, standard, config, body):
     result = orchestrator.classify(text, standard=standard, config=config,
                                    workcell=_workcell_from(body),
-                                   fact_overrides=body.get("fact_overrides"))
+                                   fact_overrides=body.get("fact_overrides"),
+                                   clarification=body.get("clarification"))
     return result.to_dict()
 
 
@@ -56,7 +57,8 @@ def _run_all(text, config, body):
     """Run ONE interpretation through every engine; return the comparison payload.
     interpreted_action is shared (same facts), so lift it to the top level."""
     results = classify_all(text, config=config, workcell=_workcell_from(body),
-                           fact_overrides=body.get("fact_overrides"))
+                           fact_overrides=body.get("fact_overrides"),
+                           clarification=body.get("clarification"))
     ordered = sorted(results.values(), key=lambda r: r.total_seconds)
     interp = ordered[0].interpreted_action if ordered else ""
     needs = any(r.needs_clarification for r in ordered)
