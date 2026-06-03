@@ -1,1 +1,0 @@
-"""MTM-UAS engine."""
