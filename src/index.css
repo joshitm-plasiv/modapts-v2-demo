@@ -577,3 +577,53 @@ html, body {
   outline: none;
 }
 .fact-edit input { width: 80px; }
+
+/* ── Sweep / what-if grid ────────────────────────────── */
+.sweep-panel {
+  margin-top: 14px;
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+}
+.sweep-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.sweep-title { font-size: 13px; color: var(--text-secondary); }
+.sweep-grid th {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.sweep-grid td { padding: 8px 10px; border-bottom: 1px solid var(--bg-tertiary); }
+
+/* ── Diff highlight (single fact-override) ───────────── */
+.steps-table tr.step-changed { background: var(--accent-glow); }
+.steps-table tr.step-added { background: var(--success-dim); }
+.diff-old { color: var(--text-muted); text-decoration: line-through; font-size: 11px; }
+.diff-total {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+.diff-up { color: var(--error); font-weight: 700; }
+.diff-down { color: var(--success); font-weight: 700; }
+
+/* ── Sweep baseline row ──────────────────────────────── */
+.sweep-grid tr.sweep-baseline { background: var(--warning-dim); }
+.sweep-baseline-tag {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--warning);
+  margin-left: 6px;
+}

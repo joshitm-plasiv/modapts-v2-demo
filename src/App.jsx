@@ -18,6 +18,27 @@ function saveToStorage(key, data) {
   try { localStorage.setItem(key, JSON.stringify(data)) } catch {}
 }
 
+// Diff two results (before/after a single fact-override) for in-place highlighting.
+// Matches steps by event_index + position; flags changed code/native, added/removed steps,
+// and the total delta. Used only for single overrides (sweep handles multi-value).
+function computeDiff(before, after) {
+  const key = (s, i) => `${s.event_index == null ? 'x' : s.event_index}:${i}`
+  const beforeMap = {}
+  ;(before.steps || []).forEach((s, i) => { beforeMap[key(s, i)] = s })
+  const stepFlags = (after.steps || []).map((s, i) => {
+    const b = beforeMap[key(s, i)]
+    if (!b) return { status: 'added' }
+    if (b.code !== s.code || b.native !== s.native) {
+      return { status: 'changed', oldCode: b.code, oldNative: b.native }
+    }
+    return { status: 'same' }
+  })
+  const beforeSecs = before.total_seconds ?? null
+  const afterSecs = after.total_seconds ?? null
+  const delta = (beforeSecs != null && afterSecs != null) ? +(afterSecs - beforeSecs).toFixed(3) : null
+  return { stepFlags, beforeSecs, afterSecs, delta }
+}
+
 function resultsReducer(state, action) {
   let next
   switch (action.type) {
@@ -28,7 +49,19 @@ function resultsReducer(state, action) {
       next = state.map(r => r.id === action.id ? { ...r, expanded: !r.expanded } : r)
       break
     case 'update_result':
-      next = state.map(r => r.id === action.id ? { ...r, result: action.result } : r)
+      // a fresh classification/override/reinterpret clears any open sweep panel.
+      // If action.diffFrom is set (single fact-override), compute a per-step diff to highlight.
+      next = state.map(r => {
+        if (r.id !== action.id) return r
+        const diff = action.diffFrom ? computeDiff(action.diffFrom, action.result) : null
+        return { ...r, result: action.result, sweep: null, diff }
+      })
+      break
+    case 'set_sweep':
+      next = state.map(r => r.id === action.id ? { ...r, sweep: action.sweep } : r)
+      break
+    case 'clear_sweep':
+      next = state.map(r => r.id === action.id ? { ...r, sweep: null } : r)
       break
     case 'clear':
       next = []
@@ -207,6 +240,9 @@ export default function App() {
     if (eventIndex == null) return
     setError(null)
     setLoading(true)
+    // capture the current result for this row to diff against the override result
+    const prior = results.find(r => r.id === resultId)
+    const diffFrom = prior && !prior.result.compare ? prior.result : null
     try {
       const fact_overrides = []
       fact_overrides[eventIndex] = patch
@@ -225,7 +261,39 @@ export default function App() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-      dispatch({ type: 'update_result', id: resultId, result: data })
+      dispatch({ type: 'update_result', id: resultId, result: data, diffFrom })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [settings, corrections])
+
+  // Multi-value sweep: one fact varied across N values, all engines, one interpretation.
+  // Transient — does NOT overwrite the stored result; opens a what-if panel beside it.
+  const submitSweep = useCallback(async (resultId, originalInput, eventIndex, field, values) => {
+    if (eventIndex == null || !values.length) return
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: originalInput,
+          standard: 'SWEEP',
+          event_index: eventIndex,
+          field,
+          values,
+          provider: settings.provider,
+          model: settings.model,
+          api_key: settings.apiKey,
+          corrections,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      dispatch({ type: 'set_sweep', id: resultId, sweep: data })
     } catch (e) {
       setError(e.message)
     } finally {
@@ -276,6 +344,8 @@ export default function App() {
         onAccept={acceptResult}
         onResolveClarification={resolveClarification}
         onFactOverride={submitFactOverride}
+        onSweep={submitSweep}
+        onClearSweep={(id) => dispatch({ type: 'clear_sweep', id })}
       />
     </>
   )

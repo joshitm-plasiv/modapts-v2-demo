@@ -1,7 +1,7 @@
 import React from 'react'
 import DetailExpansion from './DetailExpansion'
 
-export default function ResultsTable({ results, onToggle, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification, onFactOverride }) {
+export default function ResultsTable({ results, onToggle, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification, onFactOverride, onSweep, onClearSweep }) {
   if (results.length === 0) {
     return <div className="results-empty">No classifications yet. Type an operator task above.</div>
   }
@@ -49,6 +49,9 @@ export default function ResultsTable({ results, onToggle, onCodeEdit, onCodeEdit
                   onAccept={onAccept}
                   onResolveClarification={onResolveClarification}
                   onFactOverride={onFactOverride}
+                  onSweep={onSweep}
+                  sweep={r.sweep}
+                  onClearSweep={() => onClearSweep(r.id)}
                 />
               : <DetailExpansion
                   resultId={r.id}
@@ -60,6 +63,10 @@ export default function ResultsTable({ results, onToggle, onCodeEdit, onCodeEdit
                   onAccept={onAccept}
                   onResolveClarification={onResolveClarification}
                   onFactOverride={onFactOverride}
+                  onSweep={onSweep}
+                  sweep={r.sweep}
+                  onClearSweep={() => onClearSweep(r.id)}
+                  diff={r.diff}
                 />
           )}
         </div>
@@ -71,7 +78,7 @@ export default function ResultsTable({ results, onToggle, onCodeEdit, onCodeEdit
 // Compare view: one interpretation, all engines. Each row expands into its full
 // per-step audit + feedback (DetailExpansion). Reinterpret re-runs ALL standards
 // (shared facts), so it's handled at the compare level, not per row.
-function CompareDetail({ resultId, input, result, unitLabel, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification, onFactOverride }) {
+function CompareDetail({ resultId, input, result, unitLabel, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification, onFactOverride, onSweep, sweep, onClearSweep }) {
   const [openStd, setOpenStd] = React.useState(null)
 
   if (result.needs_clarification) {
@@ -133,6 +140,7 @@ function CompareDetail({ resultId, input, result, unitLabel, onCodeEdit, onCodeE
                       onAccept={onAccept}
                       onResolveClarification={onResolveClarification}
                       onFactOverride={onFactOverride}
+                      onSweep={onSweep}
                       hideInterpreted
                     />
                   </td>
