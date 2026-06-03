@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import modapts.engines  # noqa: F401  (registers MTM-UAS, MTM-1 on import)
 from modapts import orchestrator
-from modapts.orchestrator import classify_all
+from modapts.orchestrator import classify_all, classify_sweep
 from modapts.adapter import AdapterConfig, AdapterError
 from modapts.validator import ValidationError
 from modapts.core.workcell import WorkcellModel
@@ -68,6 +68,29 @@ def _run_all(text, config, body):
     }
 
 
+SWEEP_TOKEN = "SWEEP"
+
+
+def _run_sweep(text, config, body):
+    """Sensitivity sweep: one interpretation, one fact varied across N values, all engines."""
+    ev_index = int(body.get("event_index", 0))
+    field = body.get("field", "distance_cm")
+    values = body.get("values", [])
+    # numeric facts -> floats; enum facts pass through as strings
+    if field in ("distance_cm", "object_weight_kg", "rot_diameter_cm",
+                 "revolutions", "process_time_s", "clearance_mm", "tolerance_mm"):
+        parsed = []
+        for v in values:
+            try:
+                parsed.append(float(v))
+            except (TypeError, ValueError):
+                pass
+        values = parsed
+    return classify_sweep(text, ev_index, field, values, config=config,
+                          workcell=_workcell_from(body),
+                          base_overrides=body.get("fact_overrides"))
+
+
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
@@ -100,6 +123,8 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             config = AdapterConfig(provider=provider, model=model, api_key=api_key)
+            if standard.strip().upper() == SWEEP_TOKEN:
+                return self._json(200, _run_sweep(operator_input, config, body))
             if standard.strip().upper() == COMPARE_TOKEN:
                 return self._json(200, _run_all(operator_input, config, body))
             # All standards (incl. MODAPTS) run the shared NeutralEvent pipeline.
