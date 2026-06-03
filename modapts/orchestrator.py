@@ -32,11 +32,24 @@ def available_standards() -> list[str]:
 InterpretFn = Callable[[str, Optional[dict]], InterpretedAction]
 
 
-def _llm_interpret(text: str, config: Optional[dict] = None) -> InterpretedAction:
+def _llm_interpret(text: str, config: Optional[dict] = None,
+                   clarification: Optional[dict] = None) -> InterpretedAction:
     """text -> neutral facts via the LLM. Lazy import keeps orchestrator import
     light and decoupled from the adapter/interpreter; still injectable via interpret_fn."""
     from modapts.interpreter import interpret
-    return interpret(text, config)
+    return interpret(text, config, clarification=clarification)
+
+
+def _interpret_with(interpret_fn, text, config, clarification):
+    """Call the interpreter (real or injected stub). The real one accepts a
+    `clarification` kwarg; test stubs take only (text, config). Bridge both."""
+    fn = interpret_fn or _llm_interpret
+    if clarification:
+        try:
+            return fn(text, config, clarification=clarification)
+        except TypeError:
+            pass   # stub without clarification kwarg
+    return fn(text, config)
 
 
 # ── Clarification gate (deterministic) ─────────────────────────────────────────
@@ -171,7 +184,8 @@ def _apply_fact_overrides(action: "InterpretedAction", overrides: Optional[list[
 def classify(text: str, standard: str, config: Optional[dict] = None,
              workcell: Optional[WorkcellModel] = None,
              interpret_fn: Optional[InterpretFn] = None,
-             fact_overrides: Optional[list[dict]] = None) -> EngineResult:
+             fact_overrides: Optional[list[dict]] = None,
+             clarification: Optional[dict] = None) -> EngineResult:
     """Run one task through one standard. Same shape for every engine."""
     engine = ENGINE_REGISTRY.get(standard)
     if engine is None:
@@ -179,8 +193,8 @@ def classify(text: str, standard: str, config: Optional[dict] = None,
             f"No engine registered for '{standard}'. Available: {available_standards()}"
         )
 
-    interpret = interpret_fn or _llm_interpret
-    action = _apply_fact_overrides(_fill_distance_backstop(interpret(text, config)), fact_overrides)
+    raw_action = _interpret_with(interpret_fn, text, config, clarification)
+    action = _apply_fact_overrides(_fill_distance_backstop(raw_action), fact_overrides)
 
     questions = pending_clarifications(text, action)
     if questions:
@@ -195,12 +209,13 @@ def classify(text: str, standard: str, config: Optional[dict] = None,
 def classify_all(text: str, config: Optional[dict] = None,
                  workcell: Optional[WorkcellModel] = None,
                  interpret_fn: Optional[InterpretFn] = None,
-                 fact_overrides: Optional[list[dict]] = None) -> dict[str, EngineResult]:
+                 fact_overrides: Optional[list[dict]] = None,
+                 clarification: Optional[dict] = None) -> dict[str, EngineResult]:
     """Run every registered engine on the SAME interpretation (cross-standard, spec
     section 10). If the interpretation is un-decomposable / ambiguous, every engine
     returns the SAME clarification request (no fabricated codes)."""
-    interpret = interpret_fn or _llm_interpret
-    action = _apply_fact_overrides(_fill_distance_backstop(interpret(text, config)), fact_overrides)
+    raw_action = _interpret_with(interpret_fn, text, config, clarification)
+    action = _apply_fact_overrides(_fill_distance_backstop(raw_action), fact_overrides)
 
     questions = pending_clarifications(text, action)
     out: dict[str, EngineResult] = {}

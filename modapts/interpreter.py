@@ -92,11 +92,25 @@ def parse_response(raw: str) -> InterpretedAction:
 
 
 def interpret(text: str, config: Optional[AdapterConfig] = None,
-              max_retries: int = 1) -> InterpretedAction:
-    """text -> NeutralEvent facts via the LLM, with one retry on parse failure."""
+              max_retries: int = 1,
+              clarification: Optional[dict] = None) -> InterpretedAction:
+    """text -> NeutralEvent facts via the LLM, with one retry on parse failure.
+    If `clarification` ({question, answer}) is supplied, the operator's answer is
+    appended to the user message so the LLM resolves the prior ambiguity and does
+    NOT re-ask the same question."""
+    user_msg = text
+    if clarification:
+        q = clarification.get("question", "")
+        a = clarification.get("answer", "")
+        user_msg = (
+            f"{text}\n\n"
+            f"Clarification already provided — use it and do NOT ask this again:\n"
+            f"Q: {q}\nA: {a}\n"
+            f"Resolve the ambiguity with this answer and decompose normally."
+        )
     last = None
     for _ in range(1 + max_retries):
-        raw = call_llm(SYSTEM_PROMPT, text, config)
+        raw = call_llm(SYSTEM_PROMPT, user_msg, config)
         try:
             return parse_response(raw)
         except ValueError as e:

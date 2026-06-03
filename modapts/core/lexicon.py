@@ -31,7 +31,7 @@ AMBIGUOUS_TRIGGERS: dict[str, str] = {
 # sensing-dependent qualifiers (Instruction 6 core: property a default motion can't sense)
 SENSING_TRIGGERS: dict[str, str] = {
     "hot": "temperature", "cold": "temperature", "warm": "temperature",
-    "heavy": "weight", "light": "weight",
+    "heavy": "weight",
     "full": "fill", "empty": "fill",
     "cracked": "integrity", "damaged": "integrity", "broken": "integrity",
     "correct": "material", "right": "material",
