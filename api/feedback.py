@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import modapts.engines  # noqa: F401  (registers engines)
 from modapts import orchestrator
+from modapts.orchestrator import classify_all
 from modapts.adapter import AdapterConfig, AdapterError
 from modapts.feedback import analyze_code_edit
 from modapts.validator import ValidationError
@@ -37,8 +38,24 @@ def _workcell_from(body):
 
 def _run_v3(text, standard, config, body):
     result = orchestrator.classify(text, standard=standard, config=config,
-                                   workcell=_workcell_from(body))
+                                   workcell=_workcell_from(body),
+                                   fact_overrides=body.get("fact_overrides"))
     return result.to_dict()
+
+
+def _run_all(text, config, body):
+    """Compare payload — one interpretation through every engine (mirror of classify.py)."""
+    results = classify_all(text, config=config, workcell=_workcell_from(body),
+                           fact_overrides=body.get("fact_overrides"))
+    ordered = sorted(results.values(), key=lambda r: r.total_seconds)
+    interp = ordered[0].interpreted_action if ordered else ""
+    needs = any(r.needs_clarification for r in ordered)
+    return {
+        "compare": True,
+        "interpreted_action": interp,
+        "needs_clarification": needs,
+        "results": [r.to_dict() for r in ordered],
+    }
 
 
 class handler(BaseHTTPRequestHandler):
@@ -89,7 +106,9 @@ class handler(BaseHTTPRequestHandler):
         standard = body.get("standard", DEFAULT_STANDARD).strip() or DEFAULT_STANDARD
         corrections = body.get("corrections", [])
         try:
-            # All standards run the shared pipeline now.
+            if standard.upper() == "ALL":
+                return self._json(200, _run_all(corrected, config, body))
+            # Single standard runs the shared pipeline.
             return self._json(200, _run_v3(corrected, standard, config, body))
         except ValidationError as e:
             return self._error(422, f"Classification failed: {e}")
