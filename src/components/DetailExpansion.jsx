@@ -19,7 +19,7 @@ function clarifyQuestions(result) {
   return []
 }
 
-export default function DetailExpansion({ resultId, input, result, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification }) {
+export default function DetailExpansion({ resultId, input, result, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification, hideInterpreted }) {
   const [editingInterp, setEditingInterp] = useState(false)
   const [interpText, setInterpText] = useState(result.interpreted_action)
   const [clarifyResponse, setClarifyResponse] = useState('')
@@ -107,6 +107,7 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
 
   return (
     <div className="detail-panel">
+      {!hideInterpreted && (
       <div className="detail-interpreted">
         <label>Interpreted</label>
         {editingInterp ? (
@@ -122,6 +123,7 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
           </span>
         )}
       </div>
+      )}
 
       <table className="steps-table">
         <thead>
