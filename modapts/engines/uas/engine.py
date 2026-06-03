@@ -232,9 +232,13 @@ class UASEngine:
             ev = events[i]
             nxt = events[i + 1] if i + 1 < n else None
             if ev.event_type == EventType.ACQUIRE and nxt and nxt.event_type in (EventType.PLACE, EventType.MOVE):
-                steps.append(self._get_and_place(ev, nxt, ctx))   # fuse get + place
+                s = self._get_and_place(ev, nxt, ctx)            # fuse get + place
+                s.event_index = i
+                steps.append(s)
                 i += 2
             else:
-                steps.append(self.code_event(ev, ctx))
+                s = self.code_event(ev, ctx)
+                s.event_index = i
+                steps.append(s)
                 i += 1
         return finalize(self.standard, self.unit, self.seconds_per_unit, "", steps)

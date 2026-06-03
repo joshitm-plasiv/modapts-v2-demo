@@ -22,6 +22,7 @@ class Step:
     seconds: float = 0.0
     rule: Optional[str] = None                                 # why this code (audit)
     assumption: Optional[str] = None
+    event_index: Optional[int] = None                          # source NeutralEvent index (for fact correction)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

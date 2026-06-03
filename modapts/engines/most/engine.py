@@ -200,9 +200,13 @@ class MOSTEngine:
                     object_size=ev.object_size, object_weight_kg=ev.object_weight_kg,
                     source_state=ev.source_state, distance_cm=ev.distance_cm,
                     placement_accuracy=nxt.placement_accuracy, body=ev.body)
-                steps.append(self._general_move(fused))
+                s = self._general_move(fused)
+                s.event_index = i
+                steps.append(s)
                 i += 2
             else:
-                steps.append(self.code_event(ev, ctx))
+                s = self.code_event(ev, ctx)
+                s.event_index = i
+                steps.append(s)
                 i += 1
         return finalize(self.standard, self.unit, self.seconds_per_unit, "", steps)

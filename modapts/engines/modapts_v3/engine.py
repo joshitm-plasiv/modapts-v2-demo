@@ -179,6 +179,9 @@ class MODAPTSEngine:
 
     def assemble(self, events: list[NeutralEvent], ctx: Optional[WorkcellModel] = None) -> EngineResult:
         steps: list[Step] = []
-        for ev in events:
-            steps.extend(self.code_event(ev, ctx))
+        for idx, ev in enumerate(events):
+            evsteps = self.code_event(ev, ctx)
+            for s in evsteps:
+                s.event_index = idx
+            steps.extend(evsteps)
         return finalize(self.standard, self.unit, self.seconds_per_unit, "", steps)

@@ -100,9 +100,55 @@ def pending_clarifications(text: str, action: InterpretedAction) -> list[str]:
 
 
 # ── Public pipeline ────────────────────────────────────────────────────────────
+def _apply_fact_overrides(action: "InterpretedAction", overrides: Optional[list[dict]]):
+    """Patch event fields with operator corrections (deterministic — no LLM).
+    `overrides` is a list aligned to event index, each a dict of {field: value} for
+    the facts the operator corrected (e.g. {"distance_cm": 20}). Enum fields accept
+    their string value. Unknown fields/indices are ignored. Returns a new action."""
+    if not overrides:
+        return action
+    from modapts.core.neutral import (
+        InterpretedAction, SourceState, PlacementAccuracy, Symmetry, MotionPath, Force,
+    )
+    enum_map = {
+        "source_state": SourceState, "placement_accuracy": PlacementAccuracy,
+        "symmetry": Symmetry, "motion_path": MotionPath, "force": Force,
+    }
+    events = list(action.events)
+    for i, patch in enumerate(overrides):
+        if not patch or i >= len(events):
+            continue
+        ev = events[i]
+        for field, val in patch.items():
+            if val is None or not hasattr(ev, field):
+                continue
+            if field in enum_map:
+                try:
+                    setattr(ev, field, enum_map[field](val))
+                except ValueError:
+                    pass
+            elif field in ("distance_cm", "object_weight_kg", "rot_diameter_cm",
+                           "revolutions", "process_time_s", "clearance_mm", "tolerance_mm"):
+                try:
+                    setattr(ev, field, float(val))
+                except (TypeError, ValueError):
+                    pass
+            else:
+                setattr(ev, field, val)
+        # mark as operator-corrected so the audit/assumption can reflect it
+        note = "operator-corrected: " + ", ".join(f"{k}={v}" for k, v in patch.items() if v is not None)
+        ev.assumption = note if not ev.assumption else f"{ev.assumption}; {note}"
+    return InterpretedAction(
+        interpreted_action=action.interpreted_action, events=events,
+        needs_clarification=action.needs_clarification,
+        clarifying_questions=action.clarifying_questions,
+    )
+
+
 def classify(text: str, standard: str, config: Optional[dict] = None,
              workcell: Optional[WorkcellModel] = None,
-             interpret_fn: Optional[InterpretFn] = None) -> EngineResult:
+             interpret_fn: Optional[InterpretFn] = None,
+             fact_overrides: Optional[list[dict]] = None) -> EngineResult:
     """Run one task through one standard. Same shape for every engine."""
     engine = ENGINE_REGISTRY.get(standard)
     if engine is None:
@@ -111,7 +157,7 @@ def classify(text: str, standard: str, config: Optional[dict] = None,
         )
 
     interpret = interpret_fn or _llm_interpret
-    action = interpret(text, config)
+    action = _apply_fact_overrides(interpret(text, config), fact_overrides)
 
     questions = pending_clarifications(text, action)
     if questions:
@@ -125,12 +171,13 @@ def classify(text: str, standard: str, config: Optional[dict] = None,
 
 def classify_all(text: str, config: Optional[dict] = None,
                  workcell: Optional[WorkcellModel] = None,
-                 interpret_fn: Optional[InterpretFn] = None) -> dict[str, EngineResult]:
+                 interpret_fn: Optional[InterpretFn] = None,
+                 fact_overrides: Optional[list[dict]] = None) -> dict[str, EngineResult]:
     """Run every registered engine on the SAME interpretation (cross-standard, spec
     section 10). If the interpretation is un-decomposable / ambiguous, every engine
     returns the SAME clarification request (no fabricated codes)."""
     interpret = interpret_fn or _llm_interpret
-    action = interpret(text, config)
+    action = _apply_fact_overrides(interpret(text, config), fact_overrides)
 
     questions = pending_clarifications(text, action)
     out: dict[str, EngineResult] = {}

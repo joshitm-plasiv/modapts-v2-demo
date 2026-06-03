@@ -243,7 +243,8 @@ class MTM1Engine:
 
     def assemble(self, events: list[NeutralEvent], ctx: Optional[WorkcellModel] = None) -> EngineResult:
         steps: list[Step] = []
-        for ev in events:
+        for idx, ev in enumerate(events):
+            before = len(steps)
             et = ev.event_type
             if et == EventType.ACQUIRE:
                 steps.append(self._reach_step(ev))
@@ -254,4 +255,6 @@ class MTM1Engine:
                 steps.append(self._release_step(ev))
             else:
                 steps.append(self.code_event(ev, ctx))
+            for s in steps[before:]:
+                s.event_index = idx
         return finalize(self.standard, self.unit, self.seconds_per_unit, "", steps)
