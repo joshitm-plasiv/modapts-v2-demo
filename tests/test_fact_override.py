@@ -67,3 +67,81 @@ def test_feedback_reinterpret_all():
         orchestrator._llm_interpret = orig
     assert out["compare"] is True
     assert {r["standard"] for r in out["results"]} == {"MODAPTS", "MTM-1", "MTM-UAS", "BasicMOST"}
+
+
+# ── sweep: interpret once, vary one fact, all engines per value ──────────────────
+def test_sweep_one_interpretation_many_values():
+    calls = {"n": 0}
+    a = _action()
+    def stub(t, c=None):
+        calls["n"] += 1
+        return a
+    out = orchestrator.classify_sweep("x", 0, "distance_cm", [5, 7, 10, 45],
+                                      interpret_fn=stub)
+    assert calls["n"] == 1                       # ONE LLM call for all values
+    # every operator value is represented (baseline may add one more row)
+    vals = [r["value"] for r in out["rows"]]
+    for v in [5, 7, 10, 45]:
+        assert v in vals
+    # each row carries all four standards
+    for row in out["rows"]:
+        assert {r["standard"] for r in row["results"]} == {"MODAPTS", "MTM-1", "MTM-UAS", "BasicMOST"}
+    # MODAPTS reach scales: 5cm->M2, 45cm->M5
+    def reach_for(val):
+        row = [r for r in out["rows"] if r["value"] == val][0]
+        m = [r for r in row["results"] if r["standard"] == "MODAPTS"][0]
+        return m["steps"][0]["code"]
+    assert reach_for(5) == "M2"
+    assert reach_for(45) == "M5"
+
+
+def test_sweep_high_level_clarifies_not_swept():
+    a = InterpretedAction(interpreted_action="concept", events=[],
+                          needs_clarification=True, clarifying_questions=["specify components"])
+    out = orchestrator.classify_sweep("build a car", 0, "distance_cm", [5, 10],
+                                      interpret_fn=lambda t, c=None: a)
+    assert out["needs_clarification"] is True and out["rows"] == []
+
+
+# ── distance backstop (Item A): one shared default, all engines inherit it ───────
+def test_distance_backstop_fills_uniformly():
+    a = InterpretedAction(interpreted_action="x",
+        events=[NeutralEvent(event_type=EventType.ACQUIRE, object="screw",
+                             source_state=SourceState.BY_ITSELF)])   # NO distance
+    out = orchestrator.classify_all("x", interpret_fn=lambda t, c=None: a)
+    # MODAPTS reach at 30cm backstop -> M4
+    assert out["MODAPTS"].steps[0].code == "M4"
+    # the event was patched to the shared default
+    assert a.events[0].distance_cm == orchestrator.DEFAULT_DISTANCE_CM
+
+
+def test_backstop_does_not_override_stated_distance():
+    a = InterpretedAction(interpreted_action="x",
+        events=[NeutralEvent(event_type=EventType.ACQUIRE, object="screw",
+                             source_state=SourceState.BY_ITSELF, distance_cm=5)])
+    orchestrator.classify("x", "MODAPTS", interpret_fn=lambda t, c=None: a)
+    assert a.events[0].distance_cm == 5    # stated value preserved, not backstopped
+
+
+# ── sweep baseline row (Item C) ──────────────────────────────────────────────────
+def test_sweep_prepends_baseline():
+    a = InterpretedAction(interpreted_action="x",
+        events=[NeutralEvent(event_type=EventType.ACQUIRE, object="screw",
+                             source_state=SourceState.BY_ITSELF, distance_cm=5)])
+    out = orchestrator.classify_sweep("x", 0, "distance_cm", [7, 10, 15],
+                                      interpret_fn=lambda t, c=None: a)
+    assert out["baseline_value"] == 5
+    assert [r["value"] for r in out["rows"]] == [5, 7, 10, 15]
+    assert out["rows"][0]["baseline"] is True
+    assert all(r["baseline"] is False for r in out["rows"][1:])
+
+
+def test_sweep_baseline_dedup():
+    a = InterpretedAction(interpreted_action="x",
+        events=[NeutralEvent(event_type=EventType.ACQUIRE, object="screw",
+                             source_state=SourceState.BY_ITSELF, distance_cm=5)])
+    out = orchestrator.classify_sweep("x", 0, "distance_cm", [5, 7, 10],
+                                      interpret_fn=lambda t, c=None: a)
+    vals = [r["value"] for r in out["rows"]]
+    assert vals == [5, 7, 10]                     # no duplicate baseline
+    assert out["rows"][0]["baseline"] is True
