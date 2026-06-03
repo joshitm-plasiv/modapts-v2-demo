@@ -144,7 +144,7 @@ function CompareDetail({ resultId, input, result, unitLabel, onCodeEdit, onCodeE
                         a code edit knows which standard it came from. Reinterpret is hidden
                         here (handled once at compare level — see SharedInterpreted). */}
                     <DetailExpansion
-                      resultId={`${resultId}:${r.standard}`}
+                      resultId={resultId}
                       input={input}
                       result={r}
                       onCodeEdit={onCodeEdit}

@@ -320,6 +320,7 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
           {onClearSweep && <div className="feedback-actions"><button className="btn-sm ghost" onClick={onClearSweep}>Dismiss</button></div>}
         </div>
       )}
+      {editingStep !== null && feedbackPhase === 'why' && (
         <div className="feedback-inline">
           <label>Why is {selectedCode} correct instead of {result.steps[editingStep]?.code}?</label>
           <textarea rows={2} value={whyText} onChange={e => setWhyText(e.target.value)} placeholder="Optional: explain the correction…" />
