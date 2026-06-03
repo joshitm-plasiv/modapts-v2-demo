@@ -201,6 +201,38 @@ export default function App() {
     }
   }, [settings, corrections])
 
+  // Per-step fact correction: operator overrides an inferred fact (distance, weight,
+  // fit) on the source event. Deterministic — patches the event, re-runs (all four if ALL).
+  const submitFactOverride = useCallback(async (resultId, originalInput, eventIndex, patch) => {
+    if (eventIndex == null) return
+    setError(null)
+    setLoading(true)
+    try {
+      const fact_overrides = []
+      fact_overrides[eventIndex] = patch
+      const res = await fetch('/api/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: originalInput,
+          standard: settings.standard,
+          provider: settings.provider,
+          model: settings.model,
+          api_key: settings.apiKey,
+          corrections,
+          fact_overrides,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      dispatch({ type: 'update_result', id: resultId, result: data })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [settings, corrections])
+
   return (
     <>
       <header className="header">
@@ -243,6 +275,7 @@ export default function App() {
         onReinterpret={submitReinterpret}
         onAccept={acceptResult}
         onResolveClarification={resolveClarification}
+        onFactOverride={submitFactOverride}
       />
     </>
   )

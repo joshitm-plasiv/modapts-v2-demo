@@ -19,10 +19,15 @@ function clarifyQuestions(result) {
   return []
 }
 
-export default function DetailExpansion({ resultId, input, result, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification, hideInterpreted }) {
+export default function DetailExpansion({ resultId, input, result, onCodeEdit, onCodeEditComplete, onReinterpret, onAccept, onResolveClarification, onFactOverride, hideInterpreted }) {
   const [editingInterp, setEditingInterp] = useState(false)
   const [interpText, setInterpText] = useState(result.interpreted_action)
   const [clarifyResponse, setClarifyResponse] = useState('')
+
+  // Per-step fact correction (distance/weight/fit) — patches the source event, re-runs.
+  const [factStep, setFactStep] = useState(null)   // step index being corrected
+  const [factField, setFactField] = useState('distance_cm')
+  const [factValue, setFactValue] = useState('')
 
   // Path A (code edit) — MODAPTS legacy only
   const [editingStep, setEditingStep] = useState(null)
@@ -44,6 +49,12 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
     setEditingInterp(false)
   }
   const handleInterpCancel = () => { setInterpText(result.interpreted_action); setEditingInterp(false) }
+
+  const submitFact = (step) => {
+    if (factValue === '' || step.event_index == null) return
+    onFactOverride(resultId, input, step.event_index, { [factField]: factValue })
+    setFactStep(null)
+  }
 
   const startCodeEdit = (stepIndex) => {
     if (!isLegacyModapts) return  // V3 engine codes are deterministic; correct via reinterpret
@@ -164,6 +175,35 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
                   {step.rule && <div className="step-rule">{step.rule}</div>}
                   {fmtVars(step.variables) && <div className="step-vars">{fmtVars(step.variables)}</div>}
                   {step.assumption && <div className="step-assumption">{step.assumption}</div>}
+                  {onFactOverride && step.event_index != null && (
+                    factStep === i ? (
+                      <div className="fact-edit">
+                        <select value={factField} onChange={e => setFactField(e.target.value)}>
+                          <option value="distance_cm">distance (cm)</option>
+                          <option value="object_weight_kg">weight (kg)</option>
+                          <option value="placement_accuracy">fit</option>
+                        </select>
+                        {factField === 'placement_accuracy' ? (
+                          <select value={factValue} onChange={e => setFactValue(e.target.value)}>
+                            <option value="">—</option>
+                            <option value="approximate">approximate</option>
+                            <option value="loose">loose</option>
+                            <option value="tight">tight</option>
+                          </select>
+                        ) : (
+                          <input type="number" step="any" value={factValue}
+                            onChange={e => setFactValue(e.target.value)} placeholder="value"
+                            onKeyDown={e => { if (e.key === 'Enter') submitFact(step) }} autoFocus />
+                        )}
+                        <button className="btn-sm primary" onClick={() => submitFact(step)} disabled={!factValue}>Apply</button>
+                        <button className="btn-sm ghost" onClick={() => setFactStep(null)}>Cancel</button>
+                      </div>
+                    ) : (
+                      <button className="fact-edit-trigger" onClick={() => { setFactStep(i); setFactValue('') }}>
+                        ✎ correct a fact
+                      </button>
+                    )
+                  )}
                 </td>
               </tr>
             )

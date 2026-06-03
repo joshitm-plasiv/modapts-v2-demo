@@ -546,3 +546,34 @@ html, body {
 /* ── Compare view ────────────────────────────────────── */
 .compare-table th { font-size: 11px; }
 .compare-table td { padding: 10px; }
+
+/* ── Inline fact correction ──────────────────────────── */
+.fact-edit-trigger {
+  margin-top: 6px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+.fact-edit-trigger:hover { text-decoration: underline; }
+.fact-edit {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.fact-edit select, .fact-edit input {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-focus);
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: var(--radius);
+  outline: none;
+}
+.fact-edit input { width: 80px; }
