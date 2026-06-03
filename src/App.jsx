@@ -42,8 +42,9 @@ function resultsReducer(state, action) {
 
 export default function App() {
   const [settings, setSettings] = useState({
+    standard: 'MTM-UAS',
     provider: 'anthropic',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     apiKey: '',
   })
   const [showSettings, setShowSettings] = useState(true)
@@ -68,6 +69,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input,
+          standard: settings.standard,
           provider: settings.provider,
           model: settings.model,
           api_key: settings.apiKey,
@@ -133,6 +135,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           corrected_interpretation: correctedInterp,
+          standard: settings.standard,
           provider: settings.provider,
           model: settings.model,
           api_key: settings.apiKey,
@@ -180,6 +183,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input: originalInput,
+          standard: settings.standard,
           provider: settings.provider,
           model: settings.model,
           api_key: settings.apiKey,
@@ -200,7 +204,7 @@ export default function App() {
   return (
     <>
       <header className="header">
-        <h1>MODAPTS<span>/v2</span></h1>
+        <h1>PMTS<span>/v3</span></h1>
         <div className="header-right">
           {results.length > 0 && (
             <button

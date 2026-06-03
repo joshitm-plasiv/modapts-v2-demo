@@ -512,3 +512,30 @@ html, body {
     text-align: left;
   }
 }
+
+/* ── V3 multi-standard additions ─────────────────────── */
+.settings-panel { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 640px) { .settings-panel { grid-template-columns: 1fr; } }
+
+.result-standard {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-glow);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Audit trail in the Rule/Assumption cell */
+.step-rule { color: var(--text-secondary); font-size: 12px; }
+.step-vars {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.step-assumption { color: var(--warning); font-size: 11px; margin-top: 2px; }

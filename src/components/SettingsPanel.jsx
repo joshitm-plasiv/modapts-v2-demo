@@ -1,9 +1,17 @@
 import React from 'react'
 
 const PROVIDERS = [
-  { value: 'anthropic', label: 'Anthropic', defaultModel: 'claude-sonnet-4-20250514' },
+  { value: 'anthropic', label: 'Anthropic', defaultModel: 'claude-sonnet-4-6' },
   { value: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o' },
   { value: 'mistral', label: 'Mistral', defaultModel: 'mistral-large-latest' },
+]
+
+// Selectable work-measurement standards (mirrors GET /api/classify registry).
+const STANDARDS = [
+  { value: 'MTM-UAS', label: 'MTM-UAS' },
+  { value: 'MTM-1', label: 'MTM-1' },
+  { value: 'BasicMOST', label: 'BasicMOST' },
+  { value: 'MODAPTS', label: 'MODAPTS (V2)' },
 ]
 
 export default function SettingsPanel({ settings, onChange }) {
@@ -21,6 +29,14 @@ export default function SettingsPanel({ settings, onChange }) {
   return (
     <div className="settings-panel">
       <div className="settings-field">
+        <label>Standard</label>
+        <select value={settings.standard} onChange={e => update('standard', e.target.value)}>
+          {STANDARDS.map(s => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="settings-field">
         <label>Provider</label>
         <select value={settings.provider} onChange={e => update('provider', e.target.value)}>
           {PROVIDERS.map(p => (
@@ -34,7 +50,7 @@ export default function SettingsPanel({ settings, onChange }) {
           type="text"
           value={settings.model}
           onChange={e => update('model', e.target.value)}
-          placeholder="e.g. claude-sonnet-4-20250514"
+          placeholder="e.g. claude-sonnet-4-6"
         />
       </div>
       <div className="settings-field">
@@ -49,7 +65,7 @@ export default function SettingsPanel({ settings, onChange }) {
       <div className="settings-status">
         <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
         <span style={{ color: connected ? 'var(--success)' : 'var(--text-muted)' }}>
-          {connected ? `${settings.provider} / ${settings.model}` : 'Enter credentials above'}
+          {connected ? `${settings.standard} · ${settings.provider} / ${settings.model}` : 'Enter credentials above'}
         </span>
       </div>
     </div>
