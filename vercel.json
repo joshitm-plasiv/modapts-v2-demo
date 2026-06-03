@@ -2,7 +2,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" }
-  ]
+  "functions": { "api/*.py": { "includeFiles": "modapts/**" } },
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/$1" }]
 }
