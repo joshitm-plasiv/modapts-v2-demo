@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import modapts.engines  # noqa: F401  (registers MTM-UAS, MTM-1 on import)
 from modapts import orchestrator
+from modapts.orchestrator import classify_all
 from modapts.adapter import AdapterConfig, AdapterError
 from modapts.validator import ValidationError
 from modapts.core.workcell import WorkcellModel
@@ -45,6 +46,24 @@ def _run_v3(text, standard, config, body):
     result = orchestrator.classify(text, standard=standard, config=config,
                                    workcell=_workcell_from(body))
     return result.to_dict()
+
+
+COMPARE_TOKEN = "ALL"
+
+
+def _run_all(text, config, body):
+    """Run ONE interpretation through every engine; return the comparison payload.
+    interpreted_action is shared (same facts), so lift it to the top level."""
+    results = classify_all(text, config=config, workcell=_workcell_from(body))
+    ordered = sorted(results.values(), key=lambda r: r.total_seconds)
+    interp = ordered[0].interpreted_action if ordered else ""
+    needs = any(r.needs_clarification for r in ordered)
+    return {
+        "compare": True,
+        "interpreted_action": interp,
+        "needs_clarification": needs,
+        "results": [r.to_dict() for r in ordered],
+    }
 
 
 class handler(BaseHTTPRequestHandler):
@@ -79,7 +98,9 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             config = AdapterConfig(provider=provider, model=model, api_key=api_key)
-            # All standards (incl. MODAPTS) now run the shared NeutralEvent pipeline.
+            if standard.strip().upper() == COMPARE_TOKEN:
+                return self._json(200, _run_all(operator_input, config, body))
+            # All standards (incl. MODAPTS) run the shared NeutralEvent pipeline.
             return self._json(200, _run_v3(operator_input, standard, config, body))
         except ValidationError as e:
             return self._error(422, f"Classification failed: {e}")
