@@ -19,16 +19,10 @@ import modapts.engines  # noqa: F401  (registers engines)
 from modapts import orchestrator
 from modapts.adapter import AdapterConfig, AdapterError
 from modapts.feedback import analyze_code_edit
-from modapts.classifier import classify as legacy_classify
 from modapts.validator import ValidationError
 from modapts.core.workcell import WorkcellModel
 
 DEFAULT_STANDARD = "MTM-UAS"
-LEGACY_STANDARD = "MODAPTS"
-
-
-def _is_legacy(standard):
-    return (standard or DEFAULT_STANDARD).strip().upper() == LEGACY_STANDARD
 
 
 def _workcell_from(body):
@@ -95,11 +89,7 @@ class handler(BaseHTTPRequestHandler):
         standard = body.get("standard", DEFAULT_STANDARD).strip() or DEFAULT_STANDARD
         corrections = body.get("corrections", [])
         try:
-            if _is_legacy(standard):
-                result = legacy_classify(corrected, corrections=corrections, config=config)
-                result.pop("raw_response", None)
-                result.setdefault("standard", "MODAPTS")
-                return self._json(200, result)
+            # All standards run the shared pipeline now.
             return self._json(200, _run_v3(corrected, standard, config, body))
         except ValidationError as e:
             return self._error(422, f"Classification failed: {e}")

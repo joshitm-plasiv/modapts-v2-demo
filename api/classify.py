@@ -21,20 +21,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import modapts.engines  # noqa: F401  (registers MTM-UAS, MTM-1 on import)
 from modapts import orchestrator
 from modapts.adapter import AdapterConfig, AdapterError
-from modapts.classifier import classify as legacy_classify
 from modapts.validator import ValidationError
 from modapts.core.workcell import WorkcellModel
 
 DEFAULT_STANDARD = "MTM-UAS"
-LEGACY_STANDARD = "MODAPTS"
-
-
-def _is_legacy(standard):
-    return (standard or DEFAULT_STANDARD).strip().upper() == LEGACY_STANDARD
 
 
 def _available_standards():
-    return sorted({LEGACY_STANDARD, *orchestrator.available_standards()})
+    return sorted(orchestrator.available_standards())
 
 
 def _workcell_from(body):
@@ -85,12 +79,7 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             config = AdapterConfig(provider=provider, model=model, api_key=api_key)
-            if _is_legacy(standard):
-                result = legacy_classify(operator_input, corrections=corrections,
-                                         config=config, clarification=clarification)
-                result.pop("raw_response", None)
-                result.setdefault("standard", "MODAPTS")
-                return self._json(200, result)
+            # All standards (incl. MODAPTS) now run the shared NeutralEvent pipeline.
             return self._json(200, _run_v3(operator_input, standard, config, body))
         except ValidationError as e:
             return self._error(422, f"Classification failed: {e}")
