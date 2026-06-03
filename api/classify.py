@@ -60,10 +60,18 @@ def _run_all(text, config, body):
     ordered = sorted(results.values(), key=lambda r: r.total_seconds)
     interp = ordered[0].interpreted_action if ordered else ""
     needs = any(r.needs_clarification for r in ordered)
+    # questions are shared across standards — lift the first non-empty set to the top
+    questions = []
+    for r in ordered:
+        qs = getattr(r, "clarifying_questions", None) or []
+        if qs:
+            questions = qs
+            break
     return {
         "compare": True,
         "interpreted_action": interp,
         "needs_clarification": needs,
+        "clarifying_questions": questions,
         "results": [r.to_dict() for r in ordered],
     }
 
