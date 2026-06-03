@@ -91,6 +91,19 @@ function CompareDetail({ resultId, input, result, unitLabel, onCodeEdit, onCodeE
     )
   }
 
+  // Stale results saved before the compare build (or any malformed payload) may lack
+  // the results array — render a safe notice instead of crashing the page.
+  if (!Array.isArray(result.results)) {
+    return (
+      <div className="detail-panel">
+        <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          This saved result predates the current comparison format. Re-run the task to see the
+          per-standard detail.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <div className="detail-panel">
       {/* Shared interpretation — editing it re-runs ALL standards (active standard = ALL) */}

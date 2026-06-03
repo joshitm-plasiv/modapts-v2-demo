@@ -217,7 +217,7 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
           </tr>
         </thead>
         <tbody>
-          {result.steps.map((step, i) => {
+          {(result.steps || []).map((step, i) => {
             const flagged = step.variables && step.variables.flagged
             const df = diff && diff.stepFlags ? diff.stepFlags[i] : null
             const rowClass = df && df.status === 'changed' ? 'step-changed'
