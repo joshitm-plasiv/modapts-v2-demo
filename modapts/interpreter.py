@@ -51,10 +51,28 @@ If an action depends on a property the operator must determine but a default mot
 cannot sense (e.g. "if hot"), set sensing_dependency and leave the dependent coding
 to clarification — do not fabricate a sensing motion.
 
+DISTANCE / PLACEMENT (important for cross-standard consistency): for every acquire,
+move, and place event, ALWAYS provide a numeric distance_cm and (for place) a
+placement_accuracy. If the text does not state them, infer a reasonable value, put
+the field name in inferred_fields, and note it in assumption. Never omit distance_cm
+on a motion event — a missing distance makes the standards disagree. Prefer one
+explicit assumed number (e.g. 30) over leaving it blank.
+
+INSUFFICIENT DETAIL (do NOT fabricate a task): if the description is too high-level
+to decompose into concrete atomic physical events — e.g. "set up an assembly line to
+build a smartphone", a whole process or concept with no specific components, counts,
+tools, orientations, or geometry — DO NOT invent motions. Instead set
+needs_clarification=true, return an EMPTY events list, and provide 1-3 specific
+clarifying_questions naming what you need (components, fastener counts, tools,
+distances, sequence). Emitting any coded motion for an un-decomposable concept is an
+error. Only emit events when they correspond to real, described physical actions.
+
 Respond with ONLY this JSON, no markdown fences, no prose:
 {
   "interpreted_action": "<plain-language summary; semicolon-separated if multiple>",
-  "events": [ { ...fields above... } ]
+  "needs_clarification": <true only when too high-level to decompose; else false>,
+  "clarifying_questions": ["<question>", ...],   // [] when needs_clarification is false
+  "events": [ { ...fields above... } ]            // [] when needs_clarification is true
 }"""
 
 

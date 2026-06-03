@@ -143,11 +143,15 @@ class InterpretedAction:
     """The LLM's full interpretation of one task: human-readable + neutral events."""
     interpreted_action: str
     events: list[NeutralEvent] = field(default_factory=list)
+    needs_clarification: bool = False
+    clarifying_questions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "interpreted_action": self.interpreted_action,
             "events": [e.to_dict() for e in self.events],
+            "needs_clarification": self.needs_clarification,
+            "clarifying_questions": self.clarifying_questions,
         }
 
     @classmethod
@@ -155,4 +159,6 @@ class InterpretedAction:
         return cls(
             interpreted_action=d.get("interpreted_action", ""),
             events=[NeutralEvent.from_dict(e) for e in d.get("events", [])],
+            needs_clarification=bool(d.get("needs_clarification", False)),
+            clarifying_questions=list(d.get("clarifying_questions", []) or []),
         )

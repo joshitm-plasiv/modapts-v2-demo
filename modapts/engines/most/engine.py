@@ -164,11 +164,32 @@ class MOSTEngine:
         # acquire / place / free-air move -> General Move
         return self._general_move(ev)
 
+    @staticmethod
+    def _has_content(ev: NeutralEvent) -> bool:
+        """A real motion event has at least one concrete physical fact. A content-free
+        placeholder (e.g. a vague 'assembly concept') must NOT be coded — no fabrication."""
+        if ev.event_type in (EventType.BODY_MOTION, EventType.PROCESS_WAIT,
+                              EventType.OPERATE_DEVICE, EventType.USE_TOOL,
+                              EventType.MOTION_CYCLE, EventType.INSPECT):
+            return True   # these carry their own intent
+        # acquire/place/move need at least one CONCRETE fact (NA/None enums don't count)
+        from modapts.core.neutral import PlacementAccuracy as _PA, SourceState as _SS
+        concrete = (
+            ev.distance_cm is not None
+            or ev.object_weight_kg is not None
+            or (ev.placement_accuracy is not None and ev.placement_accuracy != _PA.NA)
+            or (ev.source_state is not None and ev.source_state != _SS.NA)
+        )
+        return concrete and bool(ev.object)
+
     def assemble(self, events: list[NeutralEvent], ctx: Optional[WorkcellModel] = None) -> EngineResult:
         steps: list[Step] = []
         i, n = 0, len(events)
         while i < n:
             ev = events[i]
+            if not self._has_content(ev):
+                i += 1
+                continue   # skip content-free placeholder rather than fabricate a move
             nxt = events[i + 1] if i + 1 < n else None
             # fuse an acquire + free-air place into ONE General Move (get+put+return)
             if (ev.event_type == EventType.ACQUIRE and nxt

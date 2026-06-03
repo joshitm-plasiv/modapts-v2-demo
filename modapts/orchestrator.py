@@ -71,9 +71,25 @@ def _question_for(word: str, fact: str) -> str:
 
 
 def pending_clarifications(text: str, action: InterpretedAction) -> list[str]:
-    """Lexicon hit AND the disambiguating fact missing/inferred in the events -> question."""
+    """Clarifications come from two sources:
+    1. The interpreter itself flagging the task too high-level to decompose
+       (needs_clarification=true, empty events) — its questions take priority.
+    2. A sensing/ambiguity lexicon hit whose disambiguating fact is missing/inferred.
+    """
     questions: list[str] = []
     seen: set[str] = set()
+
+    if action.needs_clarification:
+        for q in action.clarifying_questions:
+            if q and q not in seen:
+                seen.add(q)
+                questions.append(q)
+        # Interpreter says it can't decompose -> always clarify, even if it gave no question.
+        if not questions:
+            questions.append("This is too high-level to break into physical motions. "
+                             "Specify the components, fastener counts, tools, distances, and sequence.")
+        return questions
+
     for word, fact in lexicon.scan(text):
         if _fact_unresolved(fact, action.events):
             q = _question_for(word, fact)
@@ -111,12 +127,19 @@ def classify_all(text: str, config: Optional[dict] = None,
                  workcell: Optional[WorkcellModel] = None,
                  interpret_fn: Optional[InterpretFn] = None) -> dict[str, EngineResult]:
     """Run every registered engine on the SAME interpretation (cross-standard, spec
-    section 10). The comparator consumes this; built out in Step 5."""
+    section 10). If the interpretation is un-decomposable / ambiguous, every engine
+    returns the SAME clarification request (no fabricated codes)."""
     interpret = interpret_fn or _llm_interpret
     action = interpret(text, config)
+
+    questions = pending_clarifications(text, action)
     out: dict[str, EngineResult] = {}
     for std, engine in ENGINE_REGISTRY.items():
-        r = engine.assemble(action.events, workcell)
-        r.interpreted_action = action.interpreted_action
-        out[std] = r
+        if questions:
+            out[std] = clarification_result(engine.standard, engine.unit,
+                                            action.interpreted_action, questions)
+        else:
+            r = engine.assemble(action.events, workcell)
+            r.interpreted_action = action.interpreted_action
+            out[std] = r
     return out
