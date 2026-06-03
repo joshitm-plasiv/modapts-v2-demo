@@ -539,3 +539,7 @@ html, body {
   margin-top: 2px;
 }
 .step-assumption { color: var(--warning); font-size: 11px; margin-top: 2px; }
+
+/* ── Compare view ────────────────────────────────────── */
+.compare-table th { font-size: 11px; }
+.compare-table td { padding: 10px; }
