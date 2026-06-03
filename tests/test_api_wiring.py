@@ -12,17 +12,11 @@ _spec.loader.exec_module(api_classify)
 from modapts.core.workcell import WorkcellModel
 
 
-def test_legacy_routing():
-    assert api_classify._is_legacy("MODAPTS")
-    assert api_classify._is_legacy("modapts")
-    assert not api_classify._is_legacy("")                       # empty -> default UAS
-    assert not api_classify._is_legacy(api_classify.DEFAULT_STANDARD)
-    assert not api_classify._is_legacy("MTM-UAS")
-
-
-def test_available_standards_includes_legacy_and_engines():
+def test_available_standards_includes_all_four_engines():
+    # MODAPTS is now a registered engine, not a special legacy route.
     s = api_classify._available_standards()
-    assert "MODAPTS" in s and "MTM-UAS" in s and "MTM-1" in s
+    assert {"MODAPTS", "MTM-UAS", "MTM-1", "BasicMOST"}.issubset(set(s))
+    assert not hasattr(api_classify, "_is_legacy")               # legacy branch retired
 
 
 def test_workcell_from_good_and_bad():
