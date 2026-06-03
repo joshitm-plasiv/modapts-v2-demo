@@ -154,6 +154,8 @@ function CompareDetail({ resultId, input, result, unitLabel, onCodeEdit, onCodeE
                       onResolveClarification={onResolveClarification}
                       onFactOverride={onFactOverride}
                       onSweep={onSweep}
+                      sweep={sweep}
+                      onClearSweep={onClearSweep}
                       hideInterpreted
                     />
                   </td>
