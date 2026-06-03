@@ -129,14 +129,17 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
 
   const startCodeEdit = (stepIndex) => {
     if (!isLegacyModapts) return  // V3 engine codes are deterministic; correct via reinterpret
+    const s = result.steps && result.steps[stepIndex]
+    if (!s) return
     setEditingStep(stepIndex)
-    setSelectedCode(result.steps[stepIndex].code)
+    setSelectedCode(s.code)
     setWhyText(''); setFeedbackPhase('why'); setClarifyData(null); setClarifyAnswer('')
   }
   const cancelCodeEdit = () => { setEditingStep(null); setFeedbackPhase(null); setClarifyData(null) }
 
   const submitWhy = async () => {
-    const step = result.steps[editingStep]
+    const step = result.steps && result.steps[editingStep]
+    if (!step) { cancelCodeEdit(); return }
     if (selectedCode === step.code) { cancelCodeEdit(); return }
     if (!whyText.trim()) { onCodeEditComplete(input, step.code, selectedCode, '', '', ''); cancelCodeEdit(); return }
     setFeedbackLoading(true)
@@ -146,7 +149,8 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
     else { onCodeEditComplete(input, step.code, selectedCode, whyText, '', ''); cancelCodeEdit() }
   }
   const submitClarify = () => {
-    const step = result.steps[editingStep]
+    const step = result.steps && result.steps[editingStep]
+    if (!step) { cancelCodeEdit(); return }
     onCodeEditComplete(input, step.code, selectedCode, whyText, clarifyData?.clarifying_question || '', clarifyAnswer)
     cancelCodeEdit()
   }
@@ -317,7 +321,7 @@ export default function DetailExpansion({ resultId, input, result, onCodeEdit, o
         </div>
       )}
         <div className="feedback-inline">
-          <label>Why is {selectedCode} correct instead of {result.steps[editingStep].code}?</label>
+          <label>Why is {selectedCode} correct instead of {result.steps[editingStep]?.code}?</label>
           <textarea rows={2} value={whyText} onChange={e => setWhyText(e.target.value)} placeholder="Optional: explain the correction…" />
           <div className="feedback-actions">
             <button className="btn-sm ghost" onClick={cancelCodeEdit}>Cancel</button>
