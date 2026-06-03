@@ -173,3 +173,73 @@ def move_weight_factors(weight_kg: Optional[float]) -> tuple[float, float, Optio
             return const, factor, None
     hi, const, factor = MOVE_WEIGHT[-1]
     return const, factor, f"weight {weight_kg}kg exceeds card max; capped at {hi}kg band"
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# PHASE 3b VALUE TABLES — Turn, Crank, Body/Leg/Foot
+# (Disengage and Eye held for the 3b-tail: their exact values are not yet confirmed
+#  from a card and will NOT be encoded from memory.)
+# ════════════════════════════════════════════════════════════════════════════════
+
+# ── TURN: (effort, degrees) -> TMU ; effort S(0-1kg) / M(1-5kg) / L(5-16kg) ──────
+TURN_DEGREES = (30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180)
+TURN = {
+    "S": (2.8, 3.5, 4.1, 4.8, 5.4, 6.1, 6.8, 7.4, 8.1, 8.7, 9.4),
+    "M": (4.4, 5.5, 6.5, 7.5, 8.5, 9.6, 10.6, 11.6, 12.7, 13.7, 14.8),
+    "L": (8.4, 10.5, 12.3, 14.4, 16.2, 18.3, 20.4, 22.2, 24.3, 26.1, 28.2),
+}
+
+# ── CRANK: diameter cm -> (first_or_only_revolution_TMU, per_revolution_TMU) ─────
+# SUSPECT CELLS: on the card, the first-rev row dips at 24cm (15.4) and 26cm (15.7),
+# breaking an otherwise monotonic series, while the per-rev row beneath (14.2, 14.5)
+# is monotonic. Read confirmed at 6x zoom — this is a print artifact on the card.
+# Encoded AS PRINTED for source fidelity; both cells are registered in FLAGGED_CELLS
+# so the engine attaches a verify-against-clean-card flag and the feedback/promotion
+# path can correct them. Expected monotonic value is ~19.x.
+CRANK_DIAMETER = (2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 35, 40)
+CRANK_FIRST = (13.4, 14.4, 15.2, 15.9, 16.5, 17.1, 17.6, 18.0, 18.4, 18.8, 19.1,
+               15.4, 15.7, 19.5, 20.2, 20.7, 21.1)   # indices 11,12 flagged
+CRANK_PER_REV = (8.2, 9.2, 10.0, 10.7, 11.3, 11.9, 12.4, 12.8, 13.2, 13.6, 13.9,
+                 14.2, 14.5, 14.7, 15.0, 15.5, 15.9)
+
+# ── BODY / LEG / FOOT (Table 4(j)) -> TMU ; LM/Walk carry formulas, see engine ───
+BODY_LEG_FOOT = {
+    "SIT": 34.7, "STD": 43.4,
+    "TBC1": 18.6, "TBC2": 37.2,
+    "B": 29.0, "S": 29.0, "AB": 31.9, "AS": 31.9,
+    "KOK": 29.0, "KBK": 69.4, "AKOK": 31.9, "AKBK": 76.7,
+    "FM": 8.5, "FMP": 19.1,
+    "LM6": 7.1,                # leg move up to 6 in; LMX = 7.1 + 1.2*(in-6) beyond
+}
+WALK_PER_FT = 5.3             # WXFT, per foot of distance
+WALK_PER_PACE = 15.0          # WNP
+WALK_PER_PACE_OBSTRUCTED = 17.0  # WNPO (weight or obstruction)
+
+
+# ── Flagged-cell registry + provenance ───────────────────────────────────────────
+# A flagged cell is editable via operator feedback; on backend-memory integration,
+# converging field reports become a Plasiv-approved promotion (spec governance).
+# Key format: "<element>:<axis_value>". Until promoted, provenance stays "card".
+FLAGGED_CELLS: dict[str, str] = {
+    "CRANK_FIRST:24": "card prints 15.4; breaks monotonic trend (expected ~19.x) — verify clean card",
+    "CRANK_FIRST:26": "card prints 15.7; breaks monotonic trend (expected ~19.x) — verify clean card",
+}
+
+
+def turn_tmu(effort: str, degrees: float):
+    """Nearest tabulated degree step (card lists 30..180 by 15)."""
+    e = effort if effort in TURN else "S"
+    idx = min(range(len(TURN_DEGREES)), key=lambda i: abs(TURN_DEGREES[i] - degrees))
+    note = None if effort in TURN else f"turn effort unspecified; assumed small (S)"
+    return TURN[e][idx], TURN_DEGREES[idx], note
+
+
+def crank_tmu(diameter_cm: float, revolutions: float = 1.0):
+    """Total crank TMU = first-rev + (revolutions-1)*per-rev, snapping diameter to the
+    nearest tabulated column. Returns (tmu, diameter_used, flag_or_None)."""
+    idx = min(range(len(CRANK_DIAMETER)), key=lambda i: abs(CRANK_DIAMETER[i] - diameter_cm))
+    d = CRANK_DIAMETER[idx]
+    first = CRANK_FIRST[idx]
+    extra = max(0.0, revolutions - 1.0) * CRANK_PER_REV[idx]
+    flag = FLAGGED_CELLS.get(f"CRANK_FIRST:{d}")
+    return round(first + extra, 1), d, flag
