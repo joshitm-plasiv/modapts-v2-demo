@@ -92,13 +92,12 @@ def test_full_get_and_place_total():
     assert r.code_sequence.count("+") == 4
 
 
-# ── 3b elements are flagged, not fabricated ────────────────────────────────────
-def test_3b_event_flagged_not_coded():
+# ── (was 3a-only) MOTION_CYCLE is now CODED by Phase 3b — see test_mtm1_3b.py ──
+def test_motion_cycle_now_coded_in_3b():
     r = E.assemble([NeutralEvent(event_type=EventType.MOTION_CYCLE, object="crank",
-                                 revolutions=3)])
-    assert r.steps[0].code is None
-    assert "3b" in (r.steps[0].assumption or "").lower()
-    assert r.total_native == 0.0
+                                 rot_diameter_cm=10, revolutions=1)])
+    assert r.steps[0].code == "C10"        # crank, no longer code=None
+    assert r.total_native == 16.5
 
 
 # ── registration + pipeline ──────────────────────────────────────────────────────
