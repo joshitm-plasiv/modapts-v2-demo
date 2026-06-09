@@ -1,0 +1,14 @@
+# Demo dependencies.
+# Run the demo from the REPO ROOT so the local `modapts` package imports:
+#     streamlit run demo/app.py
+# (Or `pip install -e .` from the repo root to install `modapts` on the path.)
+
+streamlit>=1.32          # UI (verified working on 1.58)
+anthropic>=0.30          # live LLM path, via modapts/adapter.py (matches the repo pin)
+
+# Optional — the clickable Tier-2 graph. If absent, the panel falls back to an SVG
+# view and the drill-in buttons still work.
+streamlit-agraph>=0.0.45
+
+# NOTE: versions move; these are lower bounds, not locked. `modapts` itself is the
+# repo (not on PyPI) — it is imported locally, not installed from here.
