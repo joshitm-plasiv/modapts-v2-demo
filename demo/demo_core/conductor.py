@@ -50,6 +50,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
     activations: list[str] = []   # unique, for highlighting
     artifacts: dict[str, Any] = {}
     remeasured: dict[str, float] = {}
+    pending_feeds: dict[str, str] = {}   # station_id -> clarification, when a fed classify gates
     sections: list[str] = []
     recommendation = ""
 
@@ -83,6 +84,9 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
                         else "I need one clarification first: ")
                 sections.append(lead + qs)
                 step(node, "classifier (agent)", "blocked", "clarification needed")
+                feed = s.get("feeds") or s.get("station_id")
+                if feed:
+                    pending_feeds[feed] = qs
             else:
                 ref = ""
                 if res.get("cross_check"):
@@ -119,6 +123,13 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
                     recommendation = (f"{line.name} misses target by "
                                       f"{abs(res['gap_vs_target'])} {res['units']['throughput']} — "
                                       f"address {res['bottleneck']['station_id']}.")
+                pend = [sid for sid in pending_feeds
+                        if any(st.station_id == sid for st in line.stations)]
+                if pend:
+                    sections.append(
+                        f"_Note: the re-measurement for {', '.join(pend)} is pending the "
+                        f"clarification above — this analysis uses the current POR cycle time. "
+                        f"Answer it and re-run to thread the new time into the balance._")
                 detail = res.get("bottleneck", {}).get("station_id", "—")
                 step(node, "line-balancer (tool)", "analyse",
                      f"{line.name} · bottleneck {detail}" + (" (re-measured)" if ov else ""))
@@ -127,15 +138,25 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
             args = _sweep_args(s["text"])
             sw = classifier.sweep(s["text"], args["event_index"], args["field"], args["values"])
             step_results.append({"tool": tool, "result": sw})
-            head = (f"Sensitivity to **{sw['field']}** (interpreted: {sw['interpreted_action']}):\n\n"
-                    f"| {sw['field']} | code | MOD | seconds |\n|---|---|---|---|")
-            body = "\n".join(
-                f"| {r['value']}{' ◀ current' if r['baseline'] else ''} | {r['code_sequence']} | "
-                f"{r['total_native']} | {r['total_seconds']} |" for r in sw["rows"])
-            sections.append(head + "\n" + body)
-            recommendation = recommendation or f"The time hinges on {sw['field']} — pin it down."
-            step(node, "classifier (agent)", "sensitivity sweep",
-                 f"{sw['field']} × {len(sw['rows'])}")
+            if not sw.get("rows"):
+                if sw.get("needs_clarification"):
+                    qs = " ".join(sw.get("clarifying_questions", [])) or "I need more detail."
+                    sections.append("Before the sensitivity sweep, one clarification: " + qs)
+                    step(node, "classifier (agent)", "blocked", "clarification needed")
+                else:
+                    sections.append(f"Couldn't sweep **{sw.get('field')}** — the interpreted "
+                                    f"operation has no event to vary at that position.")
+                    step(node, "classifier (agent)", "no rows", str(sw.get("field")))
+            else:
+                head = (f"Sensitivity to **{sw['field']}** (interpreted: {sw['interpreted_action']}):\n\n"
+                        f"| {sw['field']} | code | MOD | seconds |\n|---|---|---|---|")
+                body = "\n".join(
+                    f"| {r['value']}{' ◀ current' if r['baseline'] else ''} | {r['code_sequence']} | "
+                    f"{r['total_native']} | {r['total_seconds']} |" for r in sw["rows"])
+                sections.append(head + "\n" + body)
+                recommendation = recommendation or f"The time hinges on {sw['field']} — pin it down."
+                step(node, "classifier (agent)", "sensitivity sweep",
+                     f"{sw['field']} × {len(sw['rows'])}")
 
         elif tool == "des":
             sections.append("_Dynamic / plant-wide throughput over a shift is a DES output "

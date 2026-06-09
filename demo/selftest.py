@@ -171,10 +171,55 @@ def t_arch():
     assert ARCH.NODES["memory"]["real"] is False           # 4js is an external seam here
 
 
+# ── 7. sweep / clarification fixes ────────────────────────────────────────────
+@check("sweep: placement sweep works even when the base placement is unstated (engine fix)")
+def t_sweep_nobase():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "insert screw into connector",
+            "events": [{"event_type": "acquire", "object": "screw", "distance_cm": 15, "source_state": "by_itself"},
+                       {"event_type": "place", "object": "screw", "distance_cm": 15}]})  # placement unstated
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    sw = clf.sweep("insert the screw into the connector", 1, "placement_accuracy",
+                   ["approximate", "loose", "tight"])
+    assert not sw["needs_clarification"], sw["clarifying_questions"]
+    vals = [r["value"] for r in sw["rows"]]
+    assert {"approximate", "loose", "tight"}.issubset(set(vals)), vals
+
+@check("conductor: a sweep needing a non-swept clarification shows the question, not empty rows")
+def t_sweep_clarify():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "check hot screw then place",
+            "events": [{"event_type": "inspect", "object": "screw", "sensing_dependency": "temperature"},
+                       {"event_type": "place", "object": "screw", "distance_cm": 15, "placement_accuracy": "tight"}]})
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    plan = lambda t, p, c: {"steps": [{"tool": "sensitivity",
+            "text": "is it hot — vary placement approximate loose tight"}], "note": ""}
+    out = C.run("x", load_por_xlsx(SAMPLE), clf, config=None, plan_fn=plan)
+    assert "clarification" in out["answer"].lower(), out["answer"]
+    assert "| approximate |" not in out["answer"], "should not render a table"
+
+@check("conductor: a gated re-measurement feeding a line balance is flagged pending (not silent)")
+def t_pending_feed():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "grab part and press",
+            "events": [{"event_type": "acquire", "object": "part", "distance_cm": 20},  # source unstated
+                       {"event_type": "place", "object": "part", "distance_cm": 20, "placement_accuracy": "loose"}]})
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    plan = lambda t, p, c: {"steps": [
+        {"tool": "classify", "text": "grab the part from a bin and press it in",
+         "station_id": "SMT-05", "feeds": "SMT-05"},
+        {"tool": "line_balance", "line": "PCB Stuffing Assembly"}], "note": ""}
+    out = C.run("x", load_por_xlsx(SAMPLE), clf, config=None, plan_fn=plan)
+    assert "pending" in out["answer"].lower(), out["answer"]
+    bal = [r for r in out["artifacts"]["steps"] if r["tool"] == "line_balance"][0]["result"]
+    assert bal["bottleneck"]["station_id"] == "SMT-05" and bal["bottleneck"]["cycle_time_s"] == 40.5
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
-               t_plausibility, t_sensing, t_anchor, t_sweep, t_inactive, t_arch):
+               t_plausibility, t_sensing, t_anchor, t_sweep, t_inactive, t_arch,
+               t_sweep_nobase, t_sweep_clarify, t_pending_feed):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
