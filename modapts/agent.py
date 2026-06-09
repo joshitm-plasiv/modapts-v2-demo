@@ -213,11 +213,47 @@ class ClassifierAgent:
     def learned_corrections(self) -> list:
         return list(self.memory.read(TRAINING, "fact_corrections", default=[]) or [])
 
+    # ── feedback loop (teach the interpreter via few-shot examples) ──────────────
+    def add_example(self, text: str, code: str, facts: list | None = None,
+                    standard: str = "MODAPTS", kind: str = "fact_fix",
+                    note: str = "", cap: int = 8) -> list:
+        """Record an operator-accepted classification as a few-shot example, fed back into
+        the interpreter prompt on future runs — so a corrected FACT or a directly edited
+        CODE both teach interpretation, not just override the output. Session-scoped via
+        the memory adapter; last accepted per text wins; capped to the most recent `cap`."""
+        ex = [e for e in (self.memory.read(TRAINING, "interpretation_examples", default=[]) or [])
+              if e.get("text") != text]
+        ex.append({"text": text, "code": code, "facts": facts or [],
+                   "standard": standard, "kind": kind, "note": note})
+        ex = ex[-cap:]
+        self.memory.write(TRAINING, "interpretation_examples", ex)
+        return ex
+
+    def examples(self) -> list:
+        return list(self.memory.read(TRAINING, "interpretation_examples", default=[]) or [])
+
+    def _fewshot_block(self) -> str:
+        """Compact few-shot block from accepted examples, injected into the interpreter."""
+        keys = ("source_state", "placement_accuracy", "distance_cm", "motion_path", "force")
+        lines = []
+        for e in self.examples():
+            kv = {}
+            for ev in (e.get("facts") or []):
+                for k in keys:
+                    if ev.get(k) not in (None, "", "n/a") and k not in kv:
+                        kv[k] = ev[k]
+            factstr = "; ".join(f"{k}={v}" for k, v in kv.items()) or "—"
+            note = f" ({e['note']})" if e.get("note") else ""
+            lines.append(f'- "{e["text"]}" -> {e.get("code")} [{e.get("standard")}] · '
+                         f'facts: {factstr}{note}')
+        return "\n".join(lines)
+
     def _interpret(self, text: str, clarification=None):
         base = self.interpret_fn
         if base is None:
-            return (orch._llm_interpret(text, self.config, clarification=clarification)
-                    if clarification else orch._llm_interpret(text, self.config))
+            ex = self._fewshot_block()
+            return (orch._llm_interpret(text, self.config, clarification=clarification, examples=ex)
+                    if clarification else orch._llm_interpret(text, self.config, examples=ex))
         if clarification:
             try:
                 return base(text, self.config, clarification=clarification)

@@ -33,11 +33,13 @@ InterpretFn = Callable[[str, Optional[dict]], InterpretedAction]
 
 
 def _llm_interpret(text: str, config: Optional[dict] = None,
-                   clarification: Optional[dict] = None) -> InterpretedAction:
+                   clarification: Optional[dict] = None,
+                   examples: Optional[str] = None) -> InterpretedAction:
     """text -> neutral facts via the LLM. Lazy import keeps orchestrator import
-    light and decoupled from the adapter/interpreter; still injectable via interpret_fn."""
+    light and decoupled from the adapter/interpreter; still injectable via interpret_fn.
+    `examples` is an optional operator-accepted few-shot block (the feedback loop)."""
     from modapts.interpreter import interpret
-    return interpret(text, config, clarification=clarification)
+    return interpret(text, config, clarification=clarification, examples=examples)
 
 
 def _interpret_with(interpret_fn, text, config, clarification):
@@ -231,12 +233,13 @@ def classify_all(text: str, config: Optional[dict] = None,
 
 
 def _sweep_pending(text: str, action: "InterpretedAction", swept_field: str) -> list[str]:
-    """pending_clarifications for a sensitivity sweep: keep a genuine 'cannot decompose'
-    flag and any OTHER unresolved-fact question, but DROP a clarification about the field
-    being swept — its base value is expected to be unstated precisely because the sweep
-    varies it across explicit values. (Distance is never lexicon-triggered, so distance
-    sweeps were unaffected; this fixes placement_accuracy sweeps on verbs like 'insert'.)"""
-    if action.needs_clarification:
+    """Clarifications for a sensitivity sweep. A sweep needs a DECOMPOSITION, not a fully
+    pinned task: if the interpreter produced events, proceed even if it also raised
+    side-questions (the sweep varies the swept field across explicit values, and unstated
+    motion distances fall back to the shared backstop). Only block when it could not
+    decompose at all (no events). Also drop any clarification about the field being swept,
+    and keep genuine physical ones (sensing, ambiguous grasp, etc.) via the lexicon."""
+    if action.needs_clarification and not action.events:
         return pending_clarifications(text, action)
     qs: list[str] = []
     for word, fact in lexicon.scan(text):

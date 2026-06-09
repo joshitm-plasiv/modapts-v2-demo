@@ -91,9 +91,22 @@ def parse_response(raw: str) -> InterpretedAction:
     return InterpretedAction.from_dict(data)
 
 
+def _compose_system(examples: Optional[str] = None) -> str:
+    """Base interpreter prompt, optionally augmented with operator-accepted few-shot
+    examples. This is how the feedback loop teaches the interpreter (the facts layer),
+    not just the code output."""
+    if not examples:
+        return SYSTEM_PROMPT
+    return (SYSTEM_PROMPT
+            + "\n\n## OPERATOR-ACCEPTED EXAMPLES\n"
+            + "An operator has confirmed these classifications. For operations like these, "
+            + "produce neutral facts consistent with the accepted result:\n" + examples)
+
+
 def interpret(text: str, config: Optional[AdapterConfig] = None,
               max_retries: int = 1,
-              clarification: Optional[dict] = None) -> InterpretedAction:
+              clarification: Optional[dict] = None,
+              examples: Optional[str] = None) -> InterpretedAction:
     """text -> NeutralEvent facts via the LLM, with one retry on parse failure.
     If `clarification` ({question, answer}) is supplied, the operator's answer is
     appended to the user message so the LLM resolves the prior ambiguity and does
@@ -110,7 +123,7 @@ def interpret(text: str, config: Optional[AdapterConfig] = None,
         )
     last = None
     for _ in range(1 + max_retries):
-        raw = call_llm(SYSTEM_PROMPT, user_msg, config)
+        raw = call_llm(_compose_system(examples), user_msg, config)
         try:
             return parse_response(raw)
         except ValueError as e:
