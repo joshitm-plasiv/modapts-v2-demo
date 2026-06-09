@@ -52,7 +52,7 @@ NODES: dict[str, dict] = {
     # ── L1: task ──
     "task.classifier":  {"label": "Classifier agent", "parent": "task", "kind": "task", "real": True,
                          "summary": "Agent (brain + memory + tools): MODAPTS work measurement. The only fully-realised task agent."},
-    "task.balancer":    {"label": "Line-balancer agent", "parent": "task", "kind": "task", "real": True,
+    "task.balancer":    {"label": "Line-balancer", "parent": "task", "kind": "task", "real": True,
                          "summary": "Deterministic compute (no brain — it is math): line-balance metrics. "
                                     "Auto-balance optimiser is a seam."},
     "task.des":         {"label": "DES agent", "parent": "task", "kind": "task", "real": False,
@@ -183,6 +183,8 @@ def breadcrumb(node_id: str) -> list[str]:
 _AGENT_NODES = {"chatbot", "gov.coordinator", "gov.consistency",
                 "task.classifier", "task.classifier.brain"}
 _INTERFACE_NODES = {"operator"}
+# Real, deterministic, but has a child node — should read as a tool, not a group.
+_DETERMINISTIC_TOOLS = {"task.balancer"}
 
 
 def has_brain(node_id: str) -> bool:
@@ -202,6 +204,8 @@ def node_nature(node_id: str) -> str:
         return "interface"
     if node_id in _AGENT_NODES:
         return "agent"
+    if node_id in _DETERMINISTIC_TOOLS:
+        return "tool"
     if children_of(node_id):
         return "group"
     return "tool"

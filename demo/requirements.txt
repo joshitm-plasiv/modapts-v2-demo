@@ -1,15 +1,7 @@
-# Demo dependencies.
-# Run the demo from the REPO ROOT so the local `modapts` package imports:
-#     streamlit run demo/app.py
-# (Or `pip install -e .` from the repo root to install `modapts` on the path.)
-
-streamlit>=1.32          # UI (verified working on 1.58)
-anthropic>=0.30          # live LLM path (Anthropic provider), via modapts/adapter.py
-google-genai>=1.0        # optional — only if you pick the Gemini provider (unified Google SDK)
-
-# Optional — the clickable Tier-2 graph. If absent, the panel falls back to an SVG
-# view and the drill-in buttons still work.
-streamlit-agraph>=0.0.45
-
-# NOTE: versions move; these are lower bounds, not locked. `modapts` itself is the
-# repo (not on PyPI) — it is imported locally, not installed from here.
+# Agentic digital-twin demo — LLM-only, POR-driven, multi-tool.
+streamlit>=1.32
+anthropic>=0.30          # Anthropic provider (live LLM)
+google-genai>=1.0        # Gemini provider (unified google-genai SDK)
+openpyxl>=3.1            # POR .xlsx ingestion (deterministic)
+pdfplumber>=0.11         # POR .pdf ingestion (text + tables)
+# The MODAPTS/PMTS engine is the local repo package (top-level `modapts/`), imported directly.
