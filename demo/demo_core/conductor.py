@@ -18,10 +18,28 @@ from typing import Any, Optional
 from demo_core.planner import make_plan
 from demo_core.balancer import analyse_line, format_balance
 from demo_core import judge as J
+from modapts.core.neutral import InterpretedAction as _IA
+
+
+def _derivation_md(steps: list[dict]) -> str:
+    """Render the engine's per-token derivation: each code, its MODs, the motion it stands
+    for, and WHY that code (the rule/assumption + driving fact). This is what makes a code
+    self-justifying instead of opaque — the data is already produced by the engine."""
+    if not steps:
+        return ""
+    rows = []
+    for s in steps:
+        why = s.get("assumption") or s.get("rule") or ""
+        d = (s.get("variables") or {}).get("distance_cm")
+        if d is not None and "cm" not in why:
+            why = (why + f" · {d:g} cm").strip(" ·")
+        rows.append(f"| {s.get('code')} | {s.get('native')} | {s.get('motion')} | {why} |")
+    return ("_Why this code:_\n\n| code | MOD | motion | why |\n|---|---|---|---|\n"
+            + "\n".join(rows))
 
 _NODE = {"classify": "task.classifier", "sensitivity": "task.classifier",
          "line_balance": "task.balancer", "des": "task.des",
-         "learn": "memory", "code_edit": "memory"}
+         "learn": "memory", "code_edit": "memory", "explain": "task.classifier"}
 _DIST_CTX = ("cm", "mm", "distance", "away", "reach", "far")
 _PLACEMENTS = ("approximate", "loose", "tight")
 
@@ -65,7 +83,8 @@ def _operation_text(text: str) -> str:
 
 def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
         standard: str = "MODAPTS", clarification: dict | None = None,
-        history: str | None = None) -> dict:
+        history: str | None = None, last_interpretation: dict | None = None,
+        last_derivation: list | None = None) -> dict:
     """Run one operator request end-to-end. Returns
     {answer, recommendation, trace, activations, flow, artifacts, plan, clarify, corrections}.
     `clarification` ({question, answer}) forces a single re-measure of `text` with the
@@ -138,6 +157,8 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                     f"**{res['code_sequence']} = {res['total_native']} {res['unit']} = "
                     f"{res['total_seconds']} s** ({res.get('standard', standard)}"
                     + (f", {tag}" if tag else "") + f"). Interpreted: {res['interpreted_action']}.{ref}")
+                if res.get("steps"):
+                    sections.append(_derivation_md(res["steps"]))
                 recommendation = recommendation or f"Use {res['total_seconds']} s as the activity time."
                 step(node, "classifier (agent)", "measure", res["code_sequence"])
                 if config is not None:
@@ -175,15 +196,30 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                      f"{line.name} · bottleneck {detail}" + (" (re-measured)" if ov else ""))
 
         elif tool == "sensitivity":
-            op = _operation_text(s["text"])
+            # field/values: prefer the planner's explicit values; else parse from text
             if s.get("field") and s.get("values"):
                 ei = (s["event_index"] if isinstance(s.get("event_index"), int)
                       else (0 if s["field"] == "distance_cm" else 1))
-                args = {"event_index": ei, "field": s["field"], "values": s["values"]}
+                field, values = s["field"], s["values"]
             else:
-                args = _sweep_args(s["text"])
-            sw = classifier.sweep(op, args["event_index"], args["field"], args["values"],
-                                  standard=standard)
+                a = _sweep_args(s.get("text", "")); ei, field, values = (
+                    a["event_index"], a["field"], a["values"])
+            # operation: reuse the EXACT interpretation on screen (fidelity-first); interpret
+            # fresh text only when the planner marks a NEW operation; otherwise ask.
+            target = s.get("target")
+            ifn = None
+            if last_interpretation and target != "new":
+                ifn = (lambda t, c=None: _IA.from_dict(last_interpretation))
+                op = last_interpretation.get("interpreted_action") or "the operation on screen"
+            elif s.get("text"):
+                op = _operation_text(s["text"])
+            else:
+                sections.append("I don't have an operation to sweep yet — measure one first "
+                                "(e.g. *pick a screw from a jumbled bin and insert it*), then ask "
+                                "how the time changes over a range.")
+                step(node, "classifier (agent)", "blocked", "no operation to sweep")
+                continue
+            sw = classifier.sweep(op, ei, field, values, standard=standard, interpret_fn=ifn)
             step_results.append({"tool": tool, "result": sw})
             if not sw.get("rows"):
                 if sw.get("needs_clarification"):
@@ -191,18 +227,24 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                     sections.append("Before the sensitivity sweep, one clarification: " + qs)
                     step(node, "classifier (agent)", "blocked", "clarification needed")
                 else:
-                    sections.append(f"Couldn't sweep **{sw.get('field')}** — the interpreted "
-                                    f"operation has no event to vary at that position.")
-                    step(node, "classifier (agent)", "no rows", str(sw.get("field")))
+                    sections.append(f"Couldn't sweep **{field}** — the interpreted operation has "
+                                    f"no event to vary at that position.")
+                    step(node, "classifier (agent)", "no rows", str(field))
             else:
                 unit = sw["rows"][0].get("unit") or "native"
                 head = (f"Sensitivity to **{sw['field']}** ({sw.get('standard', standard)}; "
-                        f"interpreted: {sw['interpreted_action']}):\n\n"
+                        f"interpreted: {sw['interpreted_action']} — only {sw['field']} varies, "
+                        f"the rest of the operation is held constant):\n\n"
                         f"| {sw['field']} | code | {unit} | seconds |\n|---|---|---|---|")
                 body = "\n".join(
                     f"| {r['value']}{' ◀ current' if r['baseline'] else ''} | {r['code_sequence']} | "
                     f"{r['total_native']} | {r['total_seconds']} |" for r in sw["rows"])
                 sections.append(head + "\n" + body)
+                if sw["field"] == "distance_cm":
+                    sections.append("_Reach → M-class, upper-bound banding (a convention): "
+                                    "≤2.5 M1 · ≤5 M2 · ≤15 M3 · ≤30 M4 · ≤45 M5 · >45 M7. "
+                                    "Nearest-nominal would pick the lower class for ~16–22 cm "
+                                    "(M3 not M4) and ~31–37 cm (M4 not M5)._")
                 recommendation = recommendation or f"The time hinges on {sw['field']} — pin it down."
                 step(node, "classifier (agent)", "sensitivity sweep",
                      f"{sw['field']} × {len(sw['rows'])}")
@@ -234,6 +276,17 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                 step("memory", "memory (store)", "code edit", s["code"])
             except Exception as e:
                 sections.append(f"Couldn't record the code edit: {e}")
+
+        elif tool == "explain":
+            if last_derivation:
+                sections.append("Here's how that code was derived — each token, what it means, "
+                                "and what drove it:")
+                sections.append(_derivation_md(last_derivation))
+                step("task.classifier", "classifier (agent)", "explain", "derivation of last code")
+            else:
+                sections.append("Measure something first and I'll break the code down token by "
+                                "token — what each code means and why it was assigned.")
+                step("task.classifier", "classifier (agent)", "explain", "nothing to explain yet")
 
     if not plan.get("steps"):
         names = ", ".join(por.line_names()) if por else "—"

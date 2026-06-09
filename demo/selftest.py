@@ -388,6 +388,45 @@ def t_sensitivity_explicit():
         assert f"| {v}" in out["answer"], (v, out["answer"][:200])
 
 
+@check("measurement shows a per-token derivation with the banding convention surfaced")
+def t_derivation():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "pick screw; insert",
+            "events": [{"event_type": "acquire", "object": "screw", "distance_cm": 20, "source_state": "jumbled"},
+                       {"event_type": "place", "object": "screw", "distance_cm": 15, "placement_accuracy": "tight"}]})
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    out = C.run("x", None, clf, config=None,
+                plan_fn=lambda t, p, c, history=None: {"steps": [{"tool": "classify", "text": "x"}], "note": ""})
+    assert "Why this code" in out["answer"], out["answer"]
+    assert "nearest-nominal would be M3" in out["answer"], "banding convention not surfaced"
+    assert "eye fixation" in out["answer"], "motion gloss missing"
+
+
+@check("sensitivity reuses the on-screen interpretation — the full operation (insert) is preserved")
+def t_sensitivity_fidelity():
+    li = {"interpreted_action": "pick screw from jumbled bin; insert into connector",
+          "events": [{"event_type": "acquire", "object": "screw", "distance_cm": 20, "source_state": "jumbled"},
+                     {"event_type": "place", "object": "screw", "distance_cm": 15, "placement_accuracy": "tight"}]}
+    out = C.run("what if reach is 10 to 50 in 5 cm steps", None, _clf(), config=None,
+                plan_fn=lambda t, p, c, history=None: {"steps": [{"tool": "sensitivity", "field": "distance_cm",
+                          "values": [10, 20, 30, 40, 50], "event_index": 0, "target": "current"}], "note": ""},
+                last_interpretation=li)
+    assert out["answer"].count("P5") >= 5, "insert (P5) dropped from sweep rows"
+    assert "only distance_cm varies" in out["answer"] and "upper-bound banding" in out["answer"]
+
+
+@check("explain re-renders the last derivation instead of re-running a tool")
+def t_explain():
+    ld = [{"code": "M4", "native": 4, "motion": "reach to screw", "rule": "reach -> M4",
+           "assumption": "reach 20 cm -> M4 (upper-bound [convention]; nearest M3)",
+           "variables": {"distance_cm": 20}},
+          {"code": "G3", "native": 3, "motion": "grasp screw", "rule": "grasp -> G3"}]
+    out = C.run("are you sure?", None, _clf(), config=None,
+                plan_fn=lambda t, p, c, history=None: {"steps": [{"tool": "explain"}], "note": ""},
+                last_derivation=ld)
+    assert "derived" in out["answer"] and "reach to screw" in out["answer"], out["answer"]
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
@@ -395,7 +434,8 @@ if __name__ == "__main__":
                t_sweep_nobase, t_sweep_clarify, t_pending_feed, t_standards,
                t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback,
                t_fewshot, t_no_por, t_clarify_loop, t_history_passthrough,
-               t_learn_step, t_code_edit_step, t_sensitivity_explicit):
+               t_learn_step, t_code_edit_step, t_sensitivity_explicit,
+               t_derivation, t_sensitivity_fidelity, t_explain):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)

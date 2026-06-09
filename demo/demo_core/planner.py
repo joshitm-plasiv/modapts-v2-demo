@@ -22,7 +22,7 @@ from typing import Any
 
 from modapts.adapter import call_llm
 
-TOOLS = ("classify", "line_balance", "sensitivity", "learn", "code_edit", "des")
+TOOLS = ("classify", "line_balance", "sensitivity", "learn", "code_edit", "explain", "des")
 _FIELDS = ("distance_cm", "placement_accuracy", "source_state", "motion_path", "force")
 
 
@@ -42,11 +42,17 @@ def _system(line_names: list[str]) -> str:
         "like \"the placement is tight\" or \"the bin is nested\" means RE-STATE the current "
         "operation with that change and classify it again (e.g. \"...insert it tightly...\").\n"
         "  sensitivity  — how the coded time CHANGES as ONE fact varies over a range. args: "
-        "text (the operation, context-completed — NOT the sweep wording), field (one of: "
-        + ", ".join(_FIELDS) + "), values (the EXPLICIT list to sweep — expand ranges "
-        "yourself, e.g. \"10 to 50 cm in 5 cm steps\" -> [10,15,20,25,30,35,40,45,50]), "
-        "event_index (optional int). Use when the message gives a RANGE; the operation "
-        "usually comes from context.\n"
+        "field (one of: " + ", ".join(_FIELDS) + "), values (the EXPLICIT list to sweep — "
+        "expand ranges yourself, e.g. \"10 to 50 cm in 5 cm steps\" -> "
+        "[10,15,20,25,30,35,40,45,50]), event_index (optional int), target, text. IMPORTANT: "
+        "if the sweep is about the operation ALREADY under discussion (a follow-up such as "
+        "\"what if the reach is 10-50 cm\"), set target=\"current\" and OMIT text — the system "
+        "reuses the exact operation already measured, so the full operation (e.g. the "
+        "insertion) is preserved. Only when introducing a brand-new operation set "
+        "target=\"new\" and put the full operation in text.\n"
+        "  explain      — the operator is questioning or wants the reasoning behind the LAST "
+        "result (\"why is that M4?\", \"are you sure?\", \"how did you get that?\", \"break it "
+        "down\"). args: none. Do NOT re-run a measurement or sweep for these — use explain.\n"
         "  line_balance — analyse ONE line from the POR (bottleneck, capacity vs target, "
         "efficiency, manning). args: line (MUST be exactly one of the lines listed below).\n"
         "  learn        — persist a fact-correction so FUTURE measurements auto-apply it. "
@@ -88,17 +94,23 @@ def _coerce_steps(raw: list, line_names: list[str]) -> list[dict]:
             if s.get("feeds"):
                 step["feeds"] = str(s["feeds"]).strip()
         elif tool == "sensitivity":
-            step["text"] = str(s.get("text") or "").strip()
-            if not step["text"]:
-                continue
+            txt = str(s.get("text") or "").strip()
             fld = str(s.get("field") or "").strip()
+            vals = s.get("values")
+            # actionable with a field+values (follow-up on current op) OR a fresh operation text
+            if fld not in _FIELDS and not txt:
+                continue
+            if txt:
+                step["text"] = txt
             if fld in _FIELDS:
                 step["field"] = fld
-            vals = s.get("values")
             if isinstance(vals, list) and vals:
                 step["values"] = vals
             if isinstance(s.get("event_index"), int):
                 step["event_index"] = s["event_index"]
+            tgt = str(s.get("target") or "").strip().lower()
+            if tgt in ("current", "new"):
+                step["target"] = tgt
         elif tool == "line_balance":
             line = str(s.get("line") or "").strip()
             match = lset.get(line.lower()) or next(

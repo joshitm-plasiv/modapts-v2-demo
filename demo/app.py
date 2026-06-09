@@ -110,6 +110,20 @@ def _make_config():
         return None, None
 
 
+def _last_classify() -> dict | None:
+    """The most recent completed classify result (for reusing its interpretation on a
+    sweep follow-up, and for the 'explain' breakdown). Scanned from the chat, not re-run."""
+    for m in reversed(st.session_state.get("messages", [])):
+        if m.get("role") != "assistant":
+            continue
+        for stp in reversed((m.get("artifacts") or {}).get("steps", [])):
+            if stp.get("tool") == "classify":
+                r = stp.get("result", {})
+                if r.get("code_sequence") and not r.get("needs_clarification"):
+                    return r
+    return None
+
+
 def _run(command: str):
     config, _ = _make_config()
     if config is None:
@@ -117,6 +131,10 @@ def _run(command: str):
         return
     classifier = A.make_classifier(memory=_memory(), config=config)
     por = st.session_state.get("por")
+    last_c = _last_classify()
+    last_interp = ({"interpreted_action": last_c.get("interpreted_action"),
+                    "events": last_c.get("neutral_events", [])} if last_c else None)
+    last_deriv = last_c.get("steps") if last_c else None
     pend = st.session_state.pop("pending_clarification", None)
     if pend:
         # The operator is answering a prior 'needs clarification' — thread it into a single
@@ -125,7 +143,8 @@ def _run(command: str):
                        clarification={"question": pend["question"], "answer": command})
     else:
         result = C.run(command, por, classifier, config, standard=_selected_standard(),
-                       history=_history_text())
+                       history=_history_text(), last_interpretation=last_interp,
+                       last_derivation=last_deriv)
     st.session_state.setdefault("messages", [])
     st.session_state["messages"].append({"role": "user", "content": command})
     st.session_state["messages"].append({"role": "assistant", "command": command, **result})
@@ -249,9 +268,10 @@ with left:
 
     # ── feedback now happens in the chat (corrections, "remember", sensitivity follow-ups) ──
     if (st.session_state.get("last_artifacts") or {}).get("steps"):
-        st.caption("To correct a measurement, just say so in the chat — e.g. *the placement "
-                   "is tight*, *from now on screws are tight*, or *set the code to M3+E2+G3…*. "
-                   "Follow-ups keep the thread (*what if the reach is 10\u201350 cm in 5 cm steps?*).")
+        st.caption("Everything happens here in the chat — correct a fact (*the placement is "
+                   "tight*), teach it (*from now on screws are tight*), set a code (*set the code "
+                   "to M3+E2+G3…*), follow up (*what if the reach is 10\u201350 cm in 5 cm "
+                   "steps?*), or ask why (*why is that M4?*).")
 
     _log = st.session_state.get("corrections_log") or []
     if _log:
