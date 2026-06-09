@@ -27,6 +27,7 @@ from modapts import orchestrator as orch
 from modapts.memory.base import (
     MemoryAdapter, NullMemoryAdapter, STATIC, DYNAMIC, TRAINING, TEMPORARY,
 )
+from modapts.plausibility import check_plausibility
 
 DEFAULT_ACTIVE: tuple[str, ...] = ("MODAPTS",)
 KEPT_INACTIVE: tuple[str, ...] = ("BasicMOST", "MTM-1", "MTM-UAS")
@@ -84,6 +85,20 @@ class ClassifierAgent:
         # Interpret ONCE; reuse for classify + cross-reference (no duplicate LLM call).
         raw = self._interpret(text, task_package.get("clarification"))
         orch._fill_distance_backstop(raw)  # fill distances in place (idempotent)
+
+        # Physical-plausibility gate: rule-valid is not the same as physically possible.
+        # If the interpretation is impossible (one item acquired/placed many times) or
+        # depends on an unsensable property (temperature/weight/…), clarify — never code it.
+        issues = check_plausibility(raw)
+        if issues:
+            out = {
+                "agent": "classifier", "standard": standard, "needs_clarification": True,
+                "clarifying_questions": issues, "interpreted_action": raw.interpreted_action,
+                "neutral_events": [e.to_dict() for e in raw.events],
+                "plausibility_block": True,
+            }
+            self.memory.write(TEMPORARY, "last_result", out)
+            return out
 
         # Feedback loop: merge learned corrections (TRAINING memory) with explicit ones.
         explicit = task_package.get("fact_overrides")
