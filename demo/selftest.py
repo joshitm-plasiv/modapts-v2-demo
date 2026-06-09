@@ -228,11 +228,88 @@ def t_standards():
         assert f"({std}" in out["answer"], (std, out["answer"])
 
 
+@check("sweep: meta-framing is stripped to the bare operation before interpretation")
+def t_op_strip():
+    from demo_core.conductor import _operation_text
+    op = _operation_text("Run a sensitivity sweep: picking a screw from a jumbled bin and "
+                         "inserting it into the connector — how does the time change as the "
+                         "placement accuracy goes approximate → loose → tight?")
+    assert "sensitivity" not in op.lower() and "how does" not in op.lower(), op
+    assert "screw" in op.lower() and "connector" in op.lower(), op
+
+@check("sweep: proceeds when the interpreter decomposed but also raised side-questions")
+def t_sweep_sidequestions():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "insert screw", "needs_clarification": True,
+            "clarifying_questions": ["what are the exact dimensions?"],
+            "events": [{"event_type": "acquire", "object": "screw", "distance_cm": 15, "source_state": "by_itself"},
+                       {"event_type": "place", "object": "screw", "distance_cm": 15, "placement_accuracy": "tight"}]})
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    sw = clf.sweep("insert a screw into the connector", 1, "placement_accuracy",
+                   ["approximate", "loose", "tight"])
+    assert not sw["needs_clarification"], sw["clarifying_questions"]
+    assert len(sw["rows"]) >= 3, sw["rows"]
+
+@check("conductor: a full sweep prompt with meta-framing yields a table (strip + proceed)")
+def t_conductor_sweep_full():
+    def m(text, config=None, clarification=None):  # interpreter only ever sees the stripped op
+        return IA.from_dict({"interpreted_action": "pick screw; insert",
+            "events": [{"event_type": "acquire", "object": "screw", "distance_cm": 15, "source_state": "jumbled"},
+                       {"event_type": "place", "object": "screw", "distance_cm": 15}]})  # placement unstated
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    plan = lambda t, p, c: {"steps": [{"tool": "sensitivity", "text":
+        "Run a sensitivity sweep: picking a screw from a jumbled bin and inserting it into the "
+        "connector — how does the time change as the placement accuracy goes approximate → loose → tight?"}],
+        "note": ""}
+    out = C.run("x", load_por_xlsx(SAMPLE), clf, config=None, plan_fn=plan, standard="MODAPTS")
+    assert "Sensitivity to" in out["answer"], out["answer"]
+    assert "approximate" in out["answer"] and "tight" in out["answer"], out["answer"]
+
+
+@check("feedback: a one-off fact override re-derives the code without persisting; learn() persists")
+def t_feedback():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "pick+place screw (approximate)",
+            "events": [{"event_type": "acquire", "object": "screw", "distance_cm": 15, "source_state": "jumbled"},
+                       {"event_type": "place", "object": "screw", "distance_cm": 15, "placement_accuracy": "approximate"}]})
+    mem = SessionMemoryAdapter()
+    clf = make_classifier(memory=mem, interpret_fn=m)
+    base = clf.run({"text": "pick a screw and place it", "compare": False})
+    one = clf.run({"text": "pick a screw and place it", "compare": False,
+                   "fact_overrides": [None, {"placement_accuracy": "tight"}]})
+    assert one["total_seconds"] != base["total_seconds"], (base["total_seconds"], one["total_seconds"])
+    assert clf.learned_corrections() == [], "one-off must not persist"
+    clf.learn("screw", "placement_accuracy", "tight", "place")
+    learned = clf.run({"text": "pick a screw and place it", "compare": False})
+    assert learned["total_seconds"] == one["total_seconds"], (learned["total_seconds"], one["total_seconds"])
+    assert len(clf.learned_corrections()) == 1
+    # a fresh classifier sharing the same session memory inherits the learned correction
+    again = make_classifier(memory=mem, interpret_fn=m).run({"text": "pick a screw and place it", "compare": False})
+    assert again["total_seconds"] == one["total_seconds"], "learned correction should propagate in-session"
+
+
+@check("feedback: accepted corrections are stored and injected into the interpreter prompt")
+def t_fewshot():
+    from modapts.interpreter import _compose_system, SYSTEM_PROMPT
+    mem = SessionMemoryAdapter()
+    clf = make_classifier(memory=mem, interpret_fn=lambda t, c=None, clarification=None: IA.from_dict(SCREW))
+    clf.add_example("pick a screw and insert it", "M3+E2+G3+M3+E2+P5",
+                    facts=[{"event_type": "place", "object": "screw", "placement_accuracy": "tight"}],
+                    standard="MODAPTS", kind="code_edit", note="operator")
+    assert len(clf.examples()) == 1
+    block = clf._fewshot_block()
+    assert "pick a screw and insert it" in block and "M3+E2+G3+M3+E2+P5" in block, block
+    sys = _compose_system(block)
+    assert "OPERATOR-ACCEPTED EXAMPLES" in sys and block in sys and len(sys) > len(SYSTEM_PROMPT)
+    assert _compose_system("") == SYSTEM_PROMPT       # no examples → base prompt unchanged
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
                t_plausibility, t_sensing, t_anchor, t_sweep, t_inactive, t_arch,
-               t_sweep_nobase, t_sweep_clarify, t_pending_feed, t_standards):
+               t_sweep_nobase, t_sweep_clarify, t_pending_feed, t_standards,
+               t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback, t_fewshot):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)

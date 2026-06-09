@@ -53,6 +53,94 @@ def _avail_standards() -> list:
 def _selected_standard() -> str:
     return st.session_state.get("std_choice") or "MODAPTS"
 
+
+_FACT_FIELDS = ["source_state", "distance_cm", "placement_accuracy", "motion_path", "force"]
+
+
+def _coerce_value(field: str, raw: str):
+    raw = (raw or "").strip()
+    if field == "distance_cm":
+        try:
+            return float(raw)
+        except ValueError:
+            return raw
+    return raw
+
+
+def _last_measurement():
+    """The most recent completed classify (with a code), for the correction panel."""
+    arts = st.session_state.get("last_artifacts") or {}
+    for stp in reversed(arts.get("steps", [])):
+        if stp.get("tool") == "classify":
+            r = stp.get("result", {})
+            if r.get("code_sequence") and not r.get("needs_clarification"):
+                return {"text": stp.get("text", ""), "result": r, "std": r.get("standard", "MODAPTS")}
+    return None
+
+
+def _apply_fact_correction(meas, ei, field, raw_val, remember):
+    """(a) Correct an inferred fact → the engine RE-DERIVES the code. Optionally learn()
+    it so future similar tasks auto-apply (session memory)."""
+    config, _ = _make_config()
+    if config is None:
+        st.warning("Enter a model key first."); return
+    events = meas["result"].get("neutral_events", [])
+    obj = events[ei].get("object"); etype = events[ei].get("event_type")
+    val = _coerce_value(field, raw_val)
+    if val in ("", None):
+        st.warning("Enter a corrected value."); return
+    clf = A.make_classifier(memory=_memory(), config=config)
+    try:
+        if remember:
+            clf.learn(obj, field, val, etype)
+            new = clf.run({"text": meas["text"], "compare": True, "standard": meas["std"]})
+        else:
+            fo = [None] * len(events); fo[ei] = {field: val}
+            new = clf.run({"text": meas["text"], "compare": True, "standard": meas["std"],
+                           "fact_overrides": fo})
+    except Exception as e:
+        st.error(f"Couldn't apply correction: {e}"); return
+    if new.get("needs_clarification"):
+        st.warning("After that correction the engine needs a clarification: "
+                   + " ".join(new.get("clarifying_questions", []))); return
+    old = meas["result"]
+    st.session_state["last_artifacts"].setdefault("steps", []).append(
+        {"tool": "classify", "text": meas["text"], "result": new})
+    try:
+        clf.add_example(meas["text"], new["code_sequence"], facts=new.get("neutral_events"),
+                        standard=meas["std"], kind="fact_fix")
+    except Exception:
+        pass
+    st.session_state.setdefault("corrections_log", []).append(
+        f"{obj}/{etype} · {field} → {val}: {old['code_sequence']} ({old['total_seconds']}s) → "
+        f"{new['code_sequence']} ({new['total_seconds']}s) · "
+        f"{'remembered' if remember else 'one-off'}")
+    st.success(f"{field} → {val}: **{old['code_sequence']} ({old['total_seconds']}s) → "
+               f"{new['code_sequence']} ({new['total_seconds']}s)** "
+               f"({'remembered for this session' if remember else 'one-off'}).")
+
+
+def _save_code_edit(meas, code, why):
+    """(b) Edit the code directly (like the original). Recorded as a manual override AND
+    fed back to the interpreter as a few-shot example (session-scoped), so it teaches
+    future interpretation rather than only overriding this one answer."""
+    code = (code or "").strip()
+    if not code:
+        st.warning("Enter a code."); return
+    st.session_state.setdefault("code_overrides", {})[meas["text"].strip().lower()] = {
+        "code": code, "why": why}
+    config, _ = _make_config()
+    try:
+        A.make_classifier(memory=_memory(), config=config).add_example(
+            meas["text"], code, facts=meas["result"].get("neutral_events"),
+            standard=meas["std"], kind="code_edit", note=why)
+    except Exception:
+        pass
+    st.session_state.setdefault("corrections_log", []).append(
+        f"code edit (taught): '{meas['result']['code_sequence']}' → '{code}'" + (f" — {why}" if why else ""))
+    st.success(f"Saved code edit: **{code}**" + (f" — {why}" if why else "")
+               + ". Recorded for this session and fed back to the interpreter as a few-shot example.")
+
 EXAMPLES = [
     ("① Measure an operation",
      "Measure: pick a screw from a jumbled bin and insert it into the connector"),
@@ -216,6 +304,50 @@ with left:
                 with st.expander("Trace (coordinator → tools, in order)"):
                     for t in msg.get("trace", []):
                         st.caption(f"`{t['node']}` — **{t['agent']}** · {t['action']}: {t['detail']}")
+
+    # ── correction / feedback on the last measurement ──
+    meas = _last_measurement()
+    if meas:
+        r = meas["result"]; events = r.get("neutral_events", [])
+        with st.expander("✎ Correct the last measurement (feedback)", expanded=False):
+            st.caption(f"**{r['code_sequence']} = {r['total_seconds']} s** ({meas['std']}) — "
+                       f"{r['interpreted_action']}")
+            ta, tb = st.tabs(["Fix a fact → re-derive", "Edit the code directly"])
+            with ta:
+                if events:
+                    st.selectbox("Event", list(range(len(events))), key="fb_ev",
+                                 format_func=lambda i: f"{i}: {events[i].get('event_type')} · "
+                                                       f"{events[i].get('object')}")
+                    st.selectbox("Field to correct", _FACT_FIELDS, key="fb_field")
+                    _ce = st.session_state.get("fb_ev", 0)
+                    _cf = st.session_state.get("fb_field", _FACT_FIELDS[0])
+                    _cur = events[_ce].get(_cf) if _ce < len(events) else None
+                    st.caption(f"current value: `{_cur}`")
+                    st.text_input("Corrected value", key="fb_val",
+                                  placeholder="e.g. by_itself · 15 · tight")
+                    st.checkbox("Remember for future similar tasks (this session)",
+                                value=True, key="fb_remember")
+                    if st.button("Apply correction", key="fb_apply"):
+                        _apply_fact_correction(meas, st.session_state.get("fb_ev", 0),
+                                               st.session_state.get("fb_field", _FACT_FIELDS[0]),
+                                               st.session_state.get("fb_val", ""),
+                                               st.session_state.get("fb_remember", True))
+                else:
+                    st.caption("No interpreted events available to correct.")
+            with tb:
+                st.text_input("Corrected code", value=r["code_sequence"], key="fb_code")
+                st.text_input("Why (one line, optional)", key="fb_why")
+                st.caption("A code edit is recorded for this session and fed back to the "
+                           "interpreter as a few-shot example. Fixing a fact (left tab) is the "
+                           "more direct path — it re-derives the code through the engine.")
+                if st.button("Save code edit", key="fb_savecode"):
+                    _save_code_edit(meas, st.session_state.get("fb_code", ""),
+                                    st.session_state.get("fb_why", ""))
+        _log = st.session_state.get("corrections_log") or []
+        if _log:
+            with st.expander(f"Corrections this session ({len(_log)})"):
+                for c in _log:
+                    st.caption("• " + c)
 
     typed = st.chat_input("Type an operation to measure, or ask about a line…")
     pending = st.session_state.pop("pending_cmd", None)

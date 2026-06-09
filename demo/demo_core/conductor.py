@@ -42,6 +42,26 @@ def _sweep_args(text: str) -> dict:
             "values": ["approximate", "loose", "tight"]}
 
 
+_SWEEP_PREFIX = re.compile(
+    r"^\s*(?:can you |please )?(?:run|perform|do|give me)?\s*a?\s*"
+    r"sensitivity\s+(?:sweep|analysis|study)?\s*[:\-–—]?\s*", re.I)
+_META_MARKERS = ("—", "–", "--", " how does", " how the", " how ", " vary ", " varying ",
+                 " as the placement", " as placement", " as the distance", " as the reach",
+                 " across ", " when the ", " at three ", " at different ")
+
+
+def _operation_text(text: str) -> str:
+    """Strip the sweep's meta-framing ("run a sensitivity sweep:", "how does the time
+    change as …") so the interpreter sees ONLY the physical operation. The swept field +
+    values are parsed separately from the original text by `_sweep_args`."""
+    t = _SWEEP_PREFIX.sub("", (text or "")).strip()
+    low = t.lower()
+    idxs = [j for j in (low.find(m) for m in _META_MARKERS) if j > 0]
+    if idxs:
+        t = t[:min(idxs)]
+    return t.strip().rstrip(",;:·- ") or (text or "")
+
+
 def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
         standard: str = "MODAPTS") -> dict:
     """Run one operator request end-to-end. Returns
@@ -78,7 +98,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
         if tool == "classify":
             res = classifier.run({"text": s["text"], "compare": True,
                                   "station_id": s.get("station_id"), "standard": standard})
-            step_results.append({"tool": tool, "result": res})
+            step_results.append({"tool": tool, "text": s["text"], "result": res})
             if res.get("needs_clarification"):
                 qs = " ".join(res.get("clarifying_questions", []))
                 lead = ("I can't measure that as a single operation. " if res.get("plausibility_block")
@@ -137,7 +157,8 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
 
         elif tool == "sensitivity":
             args = _sweep_args(s["text"])
-            sw = classifier.sweep(s["text"], args["event_index"], args["field"], args["values"],
+            op = _operation_text(s["text"])
+            sw = classifier.sweep(op, args["event_index"], args["field"], args["values"],
                                   standard=standard)
             step_results.append({"tool": tool, "result": sw})
             if not sw.get("rows"):
