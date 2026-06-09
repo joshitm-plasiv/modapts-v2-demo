@@ -42,7 +42,8 @@ def _sweep_args(text: str) -> dict:
             "values": ["approximate", "loose", "tight"]}
 
 
-def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict:
+def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
+        standard: str = "MODAPTS") -> dict:
     """Run one operator request end-to-end. Returns
     {answer, recommendation, trace, activations, flow, artifacts, plan}."""
     trace: list[dict] = []
@@ -76,7 +77,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
 
         if tool == "classify":
             res = classifier.run({"text": s["text"], "compare": True,
-                                  "station_id": s.get("station_id")})
+                                  "station_id": s.get("station_id"), "standard": standard})
             step_results.append({"tool": tool, "result": res})
             if res.get("needs_clarification"):
                 qs = " ".join(res.get("clarifying_questions", []))
@@ -96,7 +97,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
                 tag = s.get("station_id")
                 sections.append(
                     f"**{res['code_sequence']} = {res['total_native']} {res['unit']} = "
-                    f"{res['total_seconds']} s** (MODAPTS"
+                    f"{res['total_seconds']} s** ({res.get('standard', standard)}"
                     + (f", {tag}" if tag else "") + f"). Interpreted: {res['interpreted_action']}.{ref}")
                 recommendation = recommendation or f"Use {res['total_seconds']} s as the activity time."
                 step(node, "classifier (agent)", "measure", res["code_sequence"])
@@ -136,7 +137,8 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
 
         elif tool == "sensitivity":
             args = _sweep_args(s["text"])
-            sw = classifier.sweep(s["text"], args["event_index"], args["field"], args["values"])
+            sw = classifier.sweep(s["text"], args["event_index"], args["field"], args["values"],
+                                  standard=standard)
             step_results.append({"tool": tool, "result": sw})
             if not sw.get("rows"):
                 if sw.get("needs_clarification"):
@@ -148,8 +150,10 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None) -> dict
                                     f"operation has no event to vary at that position.")
                     step(node, "classifier (agent)", "no rows", str(sw.get("field")))
             else:
-                head = (f"Sensitivity to **{sw['field']}** (interpreted: {sw['interpreted_action']}):\n\n"
-                        f"| {sw['field']} | code | MOD | seconds |\n|---|---|---|---|")
+                unit = sw["rows"][0].get("unit") or "native"
+                head = (f"Sensitivity to **{sw['field']}** ({sw.get('standard', standard)}; "
+                        f"interpreted: {sw['interpreted_action']}):\n\n"
+                        f"| {sw['field']} | code | {unit} | seconds |\n|---|---|---|---|")
                 body = "\n".join(
                     f"| {r['value']}{' ◀ current' if r['baseline'] else ''} | {r['code_sequence']} | "
                     f"{r['total_native']} | {r['total_seconds']} |" for r in sw["rows"])

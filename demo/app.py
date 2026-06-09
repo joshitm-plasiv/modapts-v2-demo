@@ -37,6 +37,22 @@ _DEFAULT_MODEL = {"anthropic": "claude-sonnet-4-6", "gemini": "gemini-2.5-flash"
 _PROVIDER_ENV = {"anthropic": ("ANTHROPIC_API_KEY", "MODAPTS_API_KEY"),
                  "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY")}
 
+_STD_DISPLAY = {"MODAPTS": "MODAPTS", "MTM-1": "MTM-1", "MTM-UAS": "MTM-UAS", "BasicMOST": "MOST"}
+
+
+def _avail_standards() -> list:
+    """Every registered engine, MODAPTS first (default headline)."""
+    try:
+        from modapts import orchestrator as orch
+        a = list(orch.available_standards())
+        return (["MODAPTS"] + [s for s in a if s != "MODAPTS"]) if "MODAPTS" in a else (a or ["MODAPTS"])
+    except Exception:
+        return ["MODAPTS"]
+
+
+def _selected_standard() -> str:
+    return st.session_state.get("std_choice") or "MODAPTS"
+
 EXAMPLES = [
     ("① Measure an operation",
      "Measure: pick a screw from a jumbled bin and insert it into the connector"),
@@ -94,7 +110,8 @@ def _run(command: str):
         st.session_state["needs_key"] = True
         return
     classifier = A.make_classifier(memory=_memory(), config=config)
-    result = C.run(command, st.session_state.get("por"), classifier, config)
+    result = C.run(command, st.session_state.get("por"), classifier, config,
+                   standard=_selected_standard())
     st.session_state.setdefault("messages", [])
     st.session_state["messages"].append({"role": "user", "content": command})
     st.session_state["messages"].append({"role": "assistant", "command": command, **result})
@@ -120,6 +137,13 @@ with st.sidebar:
         st.success(f"Live · {prov} · `{_model}`")
     else:
         st.error("Enter a key to run (no keyless mode).")
+
+    st.divider()
+    st.subheader("Time standard")
+    st.selectbox("Headline engine", _avail_standards(), key="std_choice",
+                 format_func=lambda s: _STD_DISPLAY.get(s, s),
+                 help="All engines run on every measurement; this picks which one leads the "
+                      "answer — the others show as reference. MODAPTS, MTM-1, MTM-UAS, MOST.")
 
     st.divider()
     st.subheader("Plan of Record")
@@ -153,7 +177,9 @@ with left:
     st.title("Agentic digital twin")
     cfg, model = _make_config()
     if cfg is not None:
-        st.caption(f"🟢 Live · {prov} · `{model}` · POR: {st.session_state['por_source']} · "
+        st.caption(f"🟢 Live · {prov} · `{model}` · standard "
+                   f"**{_STD_DISPLAY.get(_selected_standard(), _selected_standard())}** · "
+                   f"POR: {st.session_state['por_source']} · "
                    f"{summary['lines']} lines / {summary['stations']} stations · "
                    f"provenance: {por.provenance}")
     else:

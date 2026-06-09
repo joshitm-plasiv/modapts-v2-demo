@@ -215,11 +215,24 @@ def t_pending_feed():
     assert bal["bottleneck"]["station_id"] == "SMT-05" and bal["bottleneck"]["cycle_time_s"] == 40.5
 
 
+@check("standards: every engine (MODAPTS/MTM-1/MTM-UAS/MOST) is selectable as the headline")
+def t_standards():
+    por = load_por_xlsx(SAMPLE)
+    plan = lambda t, p, c: {"steps": [{"tool": "classify", "text": "pick a screw and insert it"}], "note": ""}
+    expect = {"MODAPTS": 2.322, "MTM-UAS": 1.44, "MTM-1": 2.689, "BasicMOST": 3.96}
+    for std, sec in expect.items():
+        out = C.run("x", por, _clf(), config=None, plan_fn=plan, standard=std)
+        r = [x for x in out["artifacts"]["steps"] if x["tool"] == "classify"][0]["result"]
+        assert r["standard"] == std, (std, r["standard"])
+        assert r["total_seconds"] == sec, (std, r["total_seconds"])
+        assert f"({std}" in out["answer"], (std, out["answer"])
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
                t_plausibility, t_sensing, t_anchor, t_sweep, t_inactive, t_arch,
-               t_sweep_nobase, t_sweep_clarify, t_pending_feed):
+               t_sweep_nobase, t_sweep_clarify, t_pending_feed, t_standards):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
