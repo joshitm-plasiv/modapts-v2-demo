@@ -27,6 +27,12 @@ from modapts.dictionary import mod_value, HIGH_CONSCIOUS_CONTROL
 
 MOD_TO_SECONDS = 0.129
 
+# Nominal reach distance (cm) per movement class — the body member the class represents.
+# Mapping a continuous distance to a discrete class needs a rounding rule; this engine bands
+# by UPPER bound. _move_code also reports the nearest-nominal class so the convention (and
+# where the two diverge) is visible in the derivation rather than hidden.
+_NOMINAL_CM = {"M1": 2.5, "M2": 5, "M3": 15, "M4": 30, "M5": 45}
+
 
 class MODAPTSEngine:
     standard = "MODAPTS"
@@ -44,23 +50,36 @@ class MODAPTSEngine:
         xs = [n for n in notes if n]
         return "; ".join(xs) if xs else None
 
+    @staticmethod
+    def _nearest_class(cm: float) -> str:
+        if cm > 45:
+            return "M7"
+        return min(_NOMINAL_CM, key=lambda k: abs(_NOMINAL_CM[k] - cm))
+
     def _move_code(self, ev: NeutralEvent) -> tuple[str, Optional[str]]:
-        """Distance -> M-class. Standard reach mapping; default M3 (convention) if unknown."""
+        """Distance -> M-class by UPPER-bound banding (a documented convention, not a
+        MODAPTS-mandated mapping). Reports the nearest-nominal alternative when it differs,
+        so the convention is visible at the point of use."""
         cm = ev.distance_cm
         if cm is None:
-            return "M3", "distance not specified; assumed forearm reach (M3)"
-        # MODAPTS movement classes by reach length (cm).
+            return "M3", "distance not specified; assumed forearm reach (M3) [convention]"
         if cm <= 2.5:
-            return "M1", None
-        if cm <= 5:
-            return "M2", None
-        if cm <= 15:
-            return "M3", None
-        if cm <= 30:
-            return "M4", None
-        if cm <= 45:
-            return "M5", None
-        return "M7", "reach > 45cm -> trunk move (M7)"
+            ub = "M1"
+        elif cm <= 5:
+            ub = "M2"
+        elif cm <= 15:
+            ub = "M3"
+        elif cm <= 30:
+            ub = "M4"
+        elif cm <= 45:
+            ub = "M5"
+        else:
+            return "M7", f"reach {cm:g} cm > 45 cm -> trunk move (M7)"
+        nn = self._nearest_class(cm)
+        if nn != ub:
+            return ub, (f"reach {cm:g} cm -> {ub} (upper-bound banding [convention]; "
+                        f"nearest-nominal would be {nn})")
+        return ub, None
 
     def _grasp_code(self, ev: NeutralEvent) -> tuple[str, Optional[str]]:
         s, size = ev.source_state, ev.object_size
@@ -102,7 +121,8 @@ class MODAPTSEngine:
         m, mnote = self._move_code(ev)
         g, gnote = self._grasp_code(ev)
         steps.append(self._mk(f"reach to {ev.object or 'object'}", m,
-                              rule=f"reach -> {m}", assumption=mnote))
+                              rule=f"reach -> {m}", assumption=mnote,
+                              variables={"distance_cm": ev.distance_cm}))
         if g in HIGH_CONSCIOUS_CONTROL:    # G3 needs E2 first (Rule 3)
             steps.append(self._mk("eye fixation (precision grasp)", "E2",
                                   rule="E2 precedes high-control grasp (G3)"))
@@ -115,7 +135,8 @@ class MODAPTSEngine:
         m, mnote = self._move_code(ev)
         p, pnote = self._put_code(ev)
         steps.append(self._mk(f"move {ev.object or 'object'} to destination", m,
-                              rule=f"move -> {m}", assumption=mnote))
+                              rule=f"move -> {m}", assumption=mnote,
+                              variables={"distance_cm": ev.distance_cm}))
         if p in HIGH_CONSCIOUS_CONTROL:    # P2/P5 need E2 first (Rule 3)
             steps.append(self._mk("eye fixation (precision place)", "E2",
                                   rule=f"E2 precedes high-control place ({p})"))

@@ -164,16 +164,18 @@ class ClassifierAgent:
 
     # ── sensitivity sweep ───────────────────────────────────────────────────────
     def sweep(self, text: str, event_index: int, field: str, values: list,
-              standard: str = "MODAPTS") -> dict:
+              standard: str = "MODAPTS", interpret_fn=None) -> dict:
         """Sensitivity analysis: one interpretation, vary one fact, re-derive the code/
         time for each value. `standard` is the headline; the other standards are kept as
-        labelled reference per row. Wraps the engine's classify_sweep."""
+        labelled reference per row. `interpret_fn` overrides the agent's interpreter for
+        this sweep (used to reuse the operation already on screen). Wraps classify_sweep."""
         if standard not in self.active_standards:
             raise InactiveEngineError(
                 f"Standard '{standard}' is present but not active. "
                 f"Active: {list(self.active_standards)}.")
         res = orch.classify_sweep(text, event_index, field, values,
-                                  config=self.config, interpret_fn=self.interpret_fn)
+                                  config=self.config,
+                                  interpret_fn=interpret_fn or self.interpret_fn)
         rows = []
         for row in res.get("rows", []):
             eng = {r["standard"]: r for r in row["results"]}
