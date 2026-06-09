@@ -166,12 +166,6 @@ def _bundled_por():
     return load_por(str(ROOT / "demo" / "sample" / "Phase_1_POR.xlsx"))
 
 
-def _ensure_por():
-    if "por" not in st.session_state:
-        st.session_state["por"] = _bundled_por()
-        st.session_state["por_source"] = "bundled sample (Phase_1_POR.xlsx)"
-
-
 def _make_config():
     """Live-LLM config from the sidebar (session only), else env. None => no key."""
     provider = (st.session_state.get("llm_provider") or "anthropic").lower()
@@ -250,38 +244,50 @@ with st.sidebar:
                        f"{len(por.all_stations())} stations")
         except Exception as e:
             st.error(f"Couldn't parse {up.name}: {e}")
-    _ensure_por()
-    st.caption(f"Active: {st.session_state['por_source']}")
+    # No silent default: the bundled sample is opt-in, so "nothing uploaded" reads honestly.
+    if st.session_state.get("por") is None:
+        if st.button("Load built-in sample (Phase 1)", key="load_sample"):
+            st.session_state["por"] = _bundled_por()
+            st.session_state["por_source"] = "built-in sample (Phase_1_POR.xlsx)"
+            st.session_state["por_uploaded_name"] = None
+            st.rerun()
+        st.caption("No POR loaded — upload a file above, or load the built-in sample.")
+    else:
+        st.caption(f"Active: {st.session_state.get('por_source', '—')}")
     st.caption("xlsx is parsed deterministically; pdf (text+tables) uses the same mapping.")
 
 
 # ── Layout ──────────────────────────────────────────────────────────────────────
-_ensure_por()
-por = st.session_state["por"]
-summary = por.summary()
+por = st.session_state.get("por")             # may be None — no silent default
+summary = por.summary() if por else None
 left, right = st.columns([5, 4], gap="large")
 
 with left:
     st.title("Agentic digital twin")
     cfg, model = _make_config()
+    _std = _STD_DISPLAY.get(_selected_standard(), _selected_standard())
+    _por = (f"POR: {st.session_state.get('por_source')} · "
+            f"{summary['lines']} lines / {summary['stations']} stations · "
+            f"provenance: {por.provenance}" if por else "no POR loaded")
     if cfg is not None:
-        st.caption(f"🟢 Live · {prov} · `{model}` · standard "
-                   f"**{_STD_DISPLAY.get(_selected_standard(), _selected_standard())}** · "
-                   f"POR: {st.session_state['por_source']} · "
-                   f"{summary['lines']} lines / {summary['stations']} stations · "
-                   f"provenance: {por.provenance}")
+        st.caption(f"🟢 Live · {prov} · `{model}` · standard **{_std}** · {_por}")
     else:
         st.caption("🔴 No key — enter a provider key in the sidebar to run.")
 
-    with st.expander("Plant (from the POR)", expanded=False):
-        prog = ", ".join(f"{k}: {v['value']} {v.get('units') or ''}".strip()
-                         for k, v in summary["program"].items())
-        if prog:
-            st.caption("Program — " + prog)
-        for ld in summary["line_detail"]:
-            st.caption(f"**{ld['line']}** · {ld['stations']} stations · target "
-                       f"{ld['target_throughput']} {ld['throughput_unit']} · bottleneck "
-                       f"{ld['bottleneck']} @ {ld['bottleneck_ct_s']}s")
+    if por:
+        with st.expander("Plant (from the POR)", expanded=False):
+            prog = ", ".join(f"{k}: {v['value']} {v.get('units') or ''}".strip()
+                             for k, v in summary["program"].items())
+            if prog:
+                st.caption("Program — " + prog)
+            for ld in summary["line_detail"]:
+                st.caption(f"**{ld['line']}** · {ld['stations']} stations · target "
+                           f"{ld['target_throughput']} {ld['throughput_unit']} · bottleneck "
+                           f"{ld['bottleneck']} @ {ld['bottleneck_ct_s']}s")
+    else:
+        st.info("No POR loaded — upload a `.xlsx`/`.pdf` (or load the built-in sample) in the "
+                "sidebar to analyse lines. You can still measure operations and run sensitivity "
+                "sweeps; **line-balance needs a POR**.")
 
     with st.expander("Try a command (single-tool and multi-tool)", expanded=True):
         ecols = st.columns(2)

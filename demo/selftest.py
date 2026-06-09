@@ -304,12 +304,23 @@ def t_fewshot():
     assert _compose_system("") == SYSTEM_PROMPT       # no examples → base prompt unchanged
 
 
+@check("conductor: runs with no POR loaded — classify works; line_balance reports no POR")
+def t_no_por():
+    plan = lambda t, p, c: {"steps": [{"tool": "classify", "text": "pick a screw and insert it"},
+                                       {"tool": "line_balance", "line": "PCB Stuffing Assembly"}],
+                            "note": ""}
+    out = C.run("x", None, _clf(), config=None, plan_fn=plan, standard="MODAPTS")   # por=None
+    assert "2.322" in out["answer"], out["answer"]                 # classify still derives
+    assert "POR" in out["answer"], out["answer"]                   # line_balance notes the missing POR
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
                t_plausibility, t_sensing, t_anchor, t_sweep, t_inactive, t_arch,
                t_sweep_nobase, t_sweep_clarify, t_pending_feed, t_standards,
-               t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback, t_fewshot):
+               t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback,
+               t_fewshot, t_no_por):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
