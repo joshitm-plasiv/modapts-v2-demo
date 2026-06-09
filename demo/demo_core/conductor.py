@@ -20,7 +20,8 @@ from demo_core.balancer import analyse_line, format_balance
 from demo_core import judge as J
 
 _NODE = {"classify": "task.classifier", "sensitivity": "task.classifier",
-         "line_balance": "task.balancer", "des": "task.des"}
+         "line_balance": "task.balancer", "des": "task.des",
+         "learn": "memory", "code_edit": "memory"}
 _DIST_CTX = ("cm", "mm", "distance", "away", "reach", "far")
 _PLACEMENTS = ("approximate", "loose", "tight")
 
@@ -63,11 +64,13 @@ def _operation_text(text: str) -> str:
 
 
 def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
-        standard: str = "MODAPTS", clarification: dict | None = None) -> dict:
+        standard: str = "MODAPTS", clarification: dict | None = None,
+        history: str | None = None) -> dict:
     """Run one operator request end-to-end. Returns
-    {answer, recommendation, trace, activations, flow, artifacts, plan, clarify}.
+    {answer, recommendation, trace, activations, flow, artifacts, plan, clarify, corrections}.
     `clarification` ({question, answer}) forces a single re-measure of `text` with the
-    operator's answer threaded in — that's how a prior 'needs clarification' resolves."""
+    operator's answer threaded in. `history` is a compact transcript of recent turns, passed
+    to the planner so follow-ups and corrections resolve against the operation under discussion."""
     trace: list[dict] = []
     flow: list[str] = []          # ordered node sequence for the animation (repeats kept)
     activations: list[str] = []   # unique, for highlighting
@@ -75,6 +78,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
     remeasured: dict[str, float] = {}
     pending_feeds: dict[str, str] = {}   # station_id -> clarification, when a fed classify gates
     clarify_ctx: dict | None = None      # pending clarification to surface back to the app
+    corrections: list[str] = []          # learn / code_edit outcomes, for the session log
     sections: list[str] = []
     recommendation = ""
 
@@ -91,7 +95,10 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
         plan = {"steps": [{"tool": "classify", "text": text}], "note": "clarified re-measure"}
     else:
         planner = plan_fn or make_plan
-        plan = planner(text, por, config)
+        try:
+            plan = planner(text, por, config, history=history)
+        except TypeError:
+            plan = planner(text, por, config)          # back-compat for 3-arg mock plan_fns
     artifacts["plan"] = plan
     note = plan.get("note") or f"{len(plan['steps'])} step(s)"
     step("gov.coordinator", "coordinator (agent)", "plan", note)
@@ -168,8 +175,13 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                      f"{line.name} · bottleneck {detail}" + (" (re-measured)" if ov else ""))
 
         elif tool == "sensitivity":
-            args = _sweep_args(s["text"])
             op = _operation_text(s["text"])
+            if s.get("field") and s.get("values"):
+                ei = (s["event_index"] if isinstance(s.get("event_index"), int)
+                      else (0 if s["field"] == "distance_cm" else 1))
+                args = {"event_index": ei, "field": s["field"], "values": s["values"]}
+            else:
+                args = _sweep_args(s["text"])
             sw = classifier.sweep(op, args["event_index"], args["field"], args["values"],
                                   standard=standard)
             step_results.append({"tool": tool, "result": sw})
@@ -201,6 +213,28 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                             "is a seam in this demo._")
             step(node, "DES (seam)", "simulate", "not implemented (seam)")
 
+        elif tool == "learn":
+            try:
+                classifier.learn(s["object"], s["field"], s["value"], s.get("event_type"))
+                msg = (f"{s['object']} · {s.get('event_type') or 'any'} · "
+                       f"{s['field']} → {s['value']}")
+                sections.append(f"Learned: **{msg}** — future measurements this session apply "
+                                f"it automatically.")
+                corrections.append("learned: " + msg)
+                step("memory", "memory (store)", "learn", msg)
+            except Exception as e:
+                sections.append(f"Couldn't record that correction: {e}")
+
+        elif tool == "code_edit":
+            try:
+                classifier.add_example(s["text"], s["code"], standard=standard, kind="code_edit")
+                sections.append(f"Recorded your code for this operation: **{s['code']}** — fed "
+                                f"back to the interpreter as a teaching example this session.")
+                corrections.append(f"code: '{s['text'][:40]}…' → {s['code']}")
+                step("memory", "memory (store)", "code edit", s["code"])
+            except Exception as e:
+                sections.append(f"Couldn't record the code edit: {e}")
+
     if not plan.get("steps"):
         names = ", ".join(por.line_names()) if por else "—"
         sections.append("I can measure a manual operation (MODAPTS), analyse a line "
@@ -214,4 +248,4 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
     answer = "\n\n".join(sections) if sections else "—"
     return {"answer": answer, "recommendation": recommendation, "trace": trace,
             "activations": activations, "flow": flow, "artifacts": artifacts, "plan": plan,
-            "clarify": clarify_ctx}
+            "clarify": clarify_ctx, "corrections": corrections}

@@ -336,13 +336,66 @@ def t_clarify_loop():
     assert "1.935" in resolved["answer"], resolved["answer"]
 
 
+@check("conductor: passes conversation history through to the planner")
+def t_history_passthrough():
+    seen = {}
+    def plan(text, por, config, history=None):
+        seen["history"] = history
+        return {"steps": [], "note": "ok"}
+    C.run("follow up", None, _clf(), config=None, plan_fn=plan,
+          history="operator: measure a screw")
+    assert seen["history"] == "operator: measure a screw", seen
+
+
+@check("conductor: a learn step persists a fact-correction and reports it")
+def t_learn_step():
+    clf = _clf()
+    plan = lambda t, p, c, history=None: {"steps": [
+        {"tool": "learn", "object": "screw", "field": "placement_accuracy",
+         "value": "tight", "event_type": "place"}], "note": ""}
+    out = C.run("from now on screws are tight", None, clf, config=None, plan_fn=plan)
+    assert any(c.get("object") == "screw" and c.get("value") == "tight"
+               for c in clf.learned_corrections()), clf.learned_corrections()
+    assert out["corrections"] and "tight" in out["corrections"][0], out["corrections"]
+    assert "Learned" in out["answer"], out["answer"]
+
+
+@check("conductor: a code_edit step records a few-shot example and reports it")
+def t_code_edit_step():
+    clf = _clf()
+    plan = lambda t, p, c, history=None: {"steps": [
+        {"tool": "code_edit", "text": "pick a screw and insert it",
+         "code": "M3+E2+G3+M3+E2+P5"}], "note": ""}
+    out = C.run("set the code to M3+E2+G3+M3+E2+P5", None, clf, config=None, plan_fn=plan)
+    assert any(e.get("code") == "M3+E2+G3+M3+E2+P5" for e in clf.examples()), clf.examples()
+    assert out["corrections"] and "Recorded" in out["answer"], (out["corrections"], out["answer"])
+
+
+@check("conductor: sensitivity uses planner-supplied field/values (range expanded upstream)")
+def t_sensitivity_explicit():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "pick+insert screw",
+            "events": [{"event_type": "acquire", "object": "screw", "distance_cm": 15, "source_state": "jumbled"},
+                       {"event_type": "place", "object": "screw", "distance_cm": 15, "placement_accuracy": "tight"}]})
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    vals = [10, 20, 30, 40, 50]
+    plan = lambda t, p, c, history=None: {"steps": [
+        {"tool": "sensitivity", "text": "pick a screw from a jumbled bin and insert it",
+         "field": "distance_cm", "values": vals, "event_index": 0}], "note": ""}
+    out = C.run("what if reach is 10 to 50 in 10 cm steps", None, clf, config=None, plan_fn=plan)
+    assert "distance_cm" in out["answer"], out["answer"]
+    for v in (10, 50):
+        assert f"| {v}" in out["answer"], (v, out["answer"][:200])
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
                t_plausibility, t_sensing, t_anchor, t_sweep, t_inactive, t_arch,
                t_sweep_nobase, t_sweep_clarify, t_pending_feed, t_standards,
                t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback,
-               t_fewshot, t_no_por, t_clarify_loop):
+               t_fewshot, t_no_por, t_clarify_loop, t_history_passthrough,
+               t_learn_step, t_code_edit_step, t_sensitivity_explicit):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
