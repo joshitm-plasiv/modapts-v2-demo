@@ -343,11 +343,19 @@ with left:
                 if st.button("Save code edit", key="fb_savecode"):
                     _save_code_edit(meas, st.session_state.get("fb_code", ""),
                                     st.session_state.get("fb_why", ""))
-        _log = st.session_state.get("corrections_log") or []
-        if _log:
-            with st.expander(f"Corrections this session ({len(_log)})"):
-                for c in _log:
-                    st.caption("• " + c)
+    elif (st.session_state.get("last_artifacts") or {}).get("steps"):
+        with st.expander("✎ Correct an interpretation / edit a MODAPTS code (feedback)", expanded=False):
+            st.caption("This panel appears after a single **measurement** (a classify). A "
+                       "sensitivity sweep or a line-balance has nothing single to correct — run "
+                       "a measurement, e.g. *Measure: pick a screw from a jumbled bin and insert "
+                       "it into the connector*, then you can fix a fact (re-derives the code "
+                       "through the engine) or edit the MODAPTS code directly.")
+
+    _log = st.session_state.get("corrections_log") or []
+    if _log:
+        with st.expander(f"Corrections this session ({len(_log)})"):
+            for c in _log:
+                st.caption("• " + c)
 
     typed = st.chat_input("Type an operation to measure, or ask about a line…")
     pending = st.session_state.pop("pending_cmd", None)
