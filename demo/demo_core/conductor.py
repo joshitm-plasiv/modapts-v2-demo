@@ -63,15 +63,18 @@ def _operation_text(text: str) -> str:
 
 
 def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
-        standard: str = "MODAPTS") -> dict:
+        standard: str = "MODAPTS", clarification: dict | None = None) -> dict:
     """Run one operator request end-to-end. Returns
-    {answer, recommendation, trace, activations, flow, artifacts, plan}."""
+    {answer, recommendation, trace, activations, flow, artifacts, plan, clarify}.
+    `clarification` ({question, answer}) forces a single re-measure of `text` with the
+    operator's answer threaded in — that's how a prior 'needs clarification' resolves."""
     trace: list[dict] = []
     flow: list[str] = []          # ordered node sequence for the animation (repeats kept)
     activations: list[str] = []   # unique, for highlighting
     artifacts: dict[str, Any] = {}
     remeasured: dict[str, float] = {}
     pending_feeds: dict[str, str] = {}   # station_id -> clarification, when a fed classify gates
+    clarify_ctx: dict | None = None      # pending clarification to surface back to the app
     sections: list[str] = []
     recommendation = ""
 
@@ -84,8 +87,11 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
     step("operator", "operator", "request", text)
     step("chatbot", "chatbot (agent)", "receive", "interpret + decompose into a plan")
 
-    planner = plan_fn or make_plan
-    plan = planner(text, por, config)
+    if clarification:
+        plan = {"steps": [{"tool": "classify", "text": text}], "note": "clarified re-measure"}
+    else:
+        planner = plan_fn or make_plan
+        plan = planner(text, por, config)
     artifacts["plan"] = plan
     note = plan.get("note") or f"{len(plan['steps'])} step(s)"
     step("gov.coordinator", "coordinator (agent)", "plan", note)
@@ -96,8 +102,11 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
         node = _NODE.get(tool, "task.classifier")
 
         if tool == "classify":
-            res = classifier.run({"text": s["text"], "compare": True,
-                                  "station_id": s.get("station_id"), "standard": standard})
+            pkg = {"text": s["text"], "compare": True,
+                   "station_id": s.get("station_id"), "standard": standard}
+            if clarification:
+                pkg["clarification"] = clarification
+            res = classifier.run(pkg)
             step_results.append({"tool": tool, "text": s["text"], "result": res})
             if res.get("needs_clarification"):
                 qs = " ".join(res.get("clarifying_questions", []))
@@ -108,6 +117,9 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                 feed = s.get("feeds") or s.get("station_id")
                 if feed:
                     pending_feeds[feed] = qs
+                elif not res.get("plausibility_block"):
+                    clarify_ctx = {"text": s["text"], "question": qs,
+                                   "standard": res.get("standard", standard)}
             else:
                 ref = ""
                 if res.get("cross_check"):
@@ -201,4 +213,5 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
     artifacts["steps"] = step_results
     answer = "\n\n".join(sections) if sections else "—"
     return {"answer": answer, "recommendation": recommendation, "trace": trace,
-            "activations": activations, "flow": flow, "artifacts": artifacts, "plan": plan}
+            "activations": activations, "flow": flow, "artifacts": artifacts, "plan": plan,
+            "clarify": clarify_ctx}

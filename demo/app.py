@@ -192,14 +192,23 @@ def _run(command: str):
         st.session_state["needs_key"] = True
         return
     classifier = A.make_classifier(memory=_memory(), config=config)
-    result = C.run(command, st.session_state.get("por"), classifier, config,
-                   standard=_selected_standard())
+    por = st.session_state.get("por")
+    pend = st.session_state.pop("pending_clarification", None)
+    if pend:
+        # The operator is answering a prior 'needs clarification' — thread it into a single
+        # re-measure of the SAME operation, rather than re-planning the reply as a new command.
+        result = C.run(pend["text"], por, classifier, config, standard=pend["standard"],
+                       clarification={"question": pend["question"], "answer": command})
+    else:
+        result = C.run(command, por, classifier, config, standard=_selected_standard())
     st.session_state.setdefault("messages", [])
     st.session_state["messages"].append({"role": "user", "content": command})
     st.session_state["messages"].append({"role": "assistant", "command": command, **result})
     st.session_state["last_activations"] = result["activations"]
     st.session_state["last_artifacts"] = result["artifacts"]
     st.session_state["last_flow"] = result["flow"]
+    if result.get("clarify"):                 # still/again pending → the next reply answers it
+        st.session_state["pending_clarification"] = result["clarify"]
 
 
 # ── Sidebar: key (required) + POR upload ─────────────────────────────────────────
@@ -363,7 +372,10 @@ with left:
             for c in _log:
                 st.caption("• " + c)
 
-    typed = st.chat_input("Type an operation to measure, or ask about a line…")
+    _ph = ("Answer the clarification above (e.g. approximate / loose / tight)…"
+           if st.session_state.get("pending_clarification")
+           else "Type an operation to measure, or ask about a line…")
+    typed = st.chat_input(_ph)
     pending = st.session_state.pop("pending_cmd", None)
     command = typed or pending
     if command:

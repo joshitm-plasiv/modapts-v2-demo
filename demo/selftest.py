@@ -314,13 +314,35 @@ def t_no_por():
     assert "POR" in out["answer"], out["answer"]                   # line_balance notes the missing POR
 
 
+@check("clarification: a blocked classify exposes pending context; answering it resolves to a code")
+def t_clarify_loop():
+    class _Clf:                                  # isolates the conductor's threading
+        def run(self, pkg):
+            if pkg.get("clarification"):
+                return {"code_sequence": "M3+E2+G3+M3+E2+P3", "total_native": 15, "unit": "MOD",
+                        "total_seconds": 1.935, "interpreted_action": "pick+insert (loose)",
+                        "neutral_events": [], "standard": "MODAPTS"}
+            return {"needs_clarification": True,
+                    "clarifying_questions": ["For 'insert': approximate, loose, or tight?"],
+                    "interpreted_action": "pick+insert", "neutral_events": [], "standard": "MODAPTS"}
+    clf = _Clf()
+    blocked = C.run("Measure: pick a screw and insert it", None, clf, config=None,
+                    plan_fn=lambda t, p, c: {"steps": [{"tool": "classify", "text": t}], "note": ""})
+    assert blocked.get("clarify") and blocked["clarify"]["text"], blocked.get("clarify")
+    assert "clarification" in blocked["answer"].lower(), blocked["answer"]
+    resolved = C.run(blocked["clarify"]["text"], None, clf, config=None,
+                     clarification={"question": blocked["clarify"]["question"], "answer": "loose"})
+    assert not resolved.get("clarify"), resolved.get("clarify")
+    assert "1.935" in resolved["answer"], resolved["answer"]
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
                t_plausibility, t_sensing, t_anchor, t_sweep, t_inactive, t_arch,
                t_sweep_nobase, t_sweep_clarify, t_pending_feed, t_standards,
                t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback,
-               t_fewshot, t_no_por):
+               t_fewshot, t_no_por, t_clarify_loop):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
