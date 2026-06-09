@@ -5,7 +5,7 @@ Provider-agnostic adapter. Single function interface:
     call_llm(system_prompt, user_message) → raw_response
 
 Provider detected from MODAPTS_LLM_PROVIDER env var.
-Supported: anthropic, openai, mistral, ollama.
+Supported: anthropic, gemini, openai, mistral, ollama.
 
 Raises AdapterError on configuration or API failures.
 """
@@ -46,14 +46,14 @@ class AdapterConfig:
         if not provider:
             raise AdapterConfigError(
                 "MODAPTS_LLM_PROVIDER env var is required. "
-                "Supported: anthropic, openai, mistral, ollama"
+                "Supported: anthropic, gemini, openai, mistral, ollama"
             )
         if not model:
             raise AdapterConfigError(
                 "MODAPTS_LLM_MODEL env var is required. "
-                "Example: claude-sonnet-4-20250514, gpt-4o, mistral-large-latest"
+                "Example: claude-sonnet-4-6, gemini-2.5-flash, gpt-4o, mistral-large-latest"
             )
-        if provider in ("anthropic", "openai", "mistral") and not api_key:
+        if provider in ("anthropic", "gemini", "google", "openai", "mistral") and not api_key:
             raise AdapterConfigError(
                 f"MODAPTS_API_KEY env var is required for provider '{provider}'"
             )
@@ -75,6 +75,8 @@ def call_llm(system_prompt: str, user_message: str, config: Optional[AdapterConf
 
     dispatch = {
         "anthropic": _call_anthropic,
+        "gemini": _call_gemini,
+        "google": _call_gemini,
         "openai": _call_openai,
         "mistral": _call_mistral,
         "ollama": _call_ollama,
@@ -109,6 +111,38 @@ def _call_anthropic(system_prompt: str, user_message: str, config: AdapterConfig
         raise AdapterAPIError(f"Anthropic API error: {e}")
     except Exception as e:
         raise AdapterAPIError(f"Anthropic call failed: {e}")
+
+
+def _call_gemini(system_prompt: str, user_message: str, config: AdapterConfig) -> str:
+    """Google Gemini via the unified google-genai SDK (the legacy
+    google-generativeai package is deprecated)."""
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError:
+        raise AdapterError("google-genai package not installed. Run: pip install google-genai")
+
+    try:
+        client = genai.Client(api_key=config.api_key)
+        response = client.models.generate_content(
+            model=config.model,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=4096,
+            ),
+        )
+        text = getattr(response, "text", None)
+        if not text:
+            # Fallback: assemble from candidate parts if .text is empty.
+            text = "".join(
+                getattr(p, "text", "") or ""
+                for c in (getattr(response, "candidates", None) or [])
+                for p in (getattr(getattr(c, "content", None), "parts", None) or [])
+            )
+        return text
+    except Exception as e:
+        raise AdapterAPIError(f"Gemini call failed: {e}")
 
 
 def _call_openai(system_prompt: str, user_message: str, config: AdapterConfig) -> str:
