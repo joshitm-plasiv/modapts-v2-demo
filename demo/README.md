@@ -75,6 +75,7 @@ feedback loop — the new engine's analog of the product's correction flow.
 | Architecture inspector + drill-in + leaf content | **Real** — labels each node agent / tool / seam |
 | Auto-balance **optimiser** | **Seam** — undefined: Score formula + manning upper-bound delta (your call) |
 | DES / dynamic throughput | **Seam** — dynamic throughput is a simulation output, not a static sum |
+| Action layer (Dashboards / Reports / Work orders / Alerts·email) | **Seam** — only the **answer + recommendation** are produced; outputs are terminal and flow up to the chatbot |
 | External **4js** memory backend | **Seam** — demo uses a session stand-in (`SessionMemoryAdapter`); production swaps in `FourJsMemoryAdapter` |
 
 Agents vs tools: a block is an **agent** (brain + memory + tools) only where judgment

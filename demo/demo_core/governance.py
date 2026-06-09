@@ -243,6 +243,13 @@ def run_command(command: str, *, classifier, balancer, des,
                   "confidence. Auto-balance and full-shift simulation are shown as seams.")
         step("packaging (tool)", "package", "capabilities", "gov.packaging")
 
+    # Light up the action layer with the deliverable(s) actually produced (terminal, up-flow).
+    step("packaging (tool)", "deliver",
+         "answer" + (" + recommendation" if recommendation else ""), "outputs")
+    for n in ["outputs.answer"] + (["outputs.recommendation"] if recommendation else []):
+        if n not in activations:
+            activations.append(n)
+
     step("chatbot", "present", "answer + drill-in available", "chatbot")
 
     return {

@@ -289,6 +289,25 @@ def _c17():
     assert "1.935" in out["answer"] and "correction" in out["answer"], out["answer"][:160]
 
 
+# ── 18. Action layer: deliverables labelled honestly + terminal/up-flow ───────────
+@check("architecture: action layer — recommendation/answer real, dashboard/report/work-order/alert seam")
+def _c18():
+    assert ARCH.node_nature("outputs.answer") == "output"
+    assert ARCH.node_nature("outputs.recommendation") == "output"
+    for seam in ("outputs.dashboard", "outputs.report", "outputs.work_order", "outputs.alert"):
+        assert ARCH.node_nature(seam) == "seam", seam
+    # terminal/up-flow: results reach the chatbot THROUGH outputs; nothing flows down from it
+    assert ("outputs", "chatbot") in ARCH.L0_EDGES
+    assert not any(s == "outputs" and t in ("gov", "task", "memory") for s, t in ARCH.L0_EDGES)
+    # a classify run lights up the produced deliverables
+    mem = DictMemoryAdapter()
+    out = G.run_command("Measure: pick a screw and insert into the connector",
+                        classifier=A.make_classifier(mem), balancer=A.LineBalancerAgent(mem),
+                        des=A.DESAgent(mem), memory=mem)
+    assert "outputs.answer" in out["activations"], out["activations"]
+    assert "outputs.recommendation" in out["activations"], out["activations"]
+
+
 def main() -> int:
     print("Demo — headless self-test\n" + "=" * 48)
     passed = failed = 0

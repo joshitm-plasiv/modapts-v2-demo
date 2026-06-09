@@ -29,8 +29,10 @@ NODES: dict[str, dict] = {
                   "summary": "The task agents that do the work."},
     "memory":    {"label": "Memory (4js)", "parent": None, "kind": "memory", "real": False,
                   "summary": "External memory service (seam). The demo uses a session-scoped stand-in."},
-    "outputs":   {"label": "Outputs", "parent": None, "kind": "io", "real": True,
-                  "summary": "Answer + recommendation + the audit/trace the operator can inspect."},
+    "outputs":   {"label": "Outputs (action layer)", "parent": None, "kind": "io", "real": True,
+                  "summary": "What the system delivers, reported UP to the chatbot. Terminal — "
+                             "produced last by Packaging; never in the input path. Only the answer "
+                             "+ recommendation are built here; the rest are seams."},
 
     # ── L1: governance ──
     "gov.coordinator":  {"label": "Coordinator", "parent": "gov", "kind": "gov", "real": True,
@@ -66,6 +68,20 @@ NODES: dict[str, dict] = {
     "memory.temporary": {"label": "Temporary", "parent": "memory", "kind": "memory", "real": True,
                          "summary": "Per-task working state."},
 
+    # ── L1: outputs (action layer — what the system delivers) ──
+    "outputs.answer":         {"label": "Answer + audit/trace", "parent": "outputs", "kind": "leaf", "real": True,
+                               "summary": "The measured time/codes plus the inspectable trace. Real."},
+    "outputs.recommendation": {"label": "Recommendation", "parent": "outputs", "kind": "leaf", "real": True,
+                               "summary": "The suggested action (use this time / pin this fact). Real."},
+    "outputs.dashboard":      {"label": "Dashboard", "parent": "outputs", "kind": "leaf", "real": False,
+                               "summary": "Live line dashboard. Not implemented (seam)."},
+    "outputs.report":         {"label": "Report", "parent": "outputs", "kind": "leaf", "real": False,
+                               "summary": "Exported study / report. Not implemented (seam)."},
+    "outputs.work_order":     {"label": "Work order", "parent": "outputs", "kind": "leaf", "real": False,
+                               "summary": "Generated work order. Not implemented (seam)."},
+    "outputs.alert":          {"label": "Alert · email", "parent": "outputs", "kind": "leaf", "real": False,
+                               "summary": "Threshold alert / email. Not implemented (seam)."},
+
     # ── L2: classifier internals ──
     "task.classifier.brain":      {"label": "Brain (LLM)", "parent": "task.classifier", "kind": "leaf", "real": True,
                                    "summary": "Text → neutral facts. The LLM emits facts only, never codes/numbers."},
@@ -81,11 +97,12 @@ NODES: dict[str, dict] = {
                                    "summary": "LBE / LBR / smoothness / manning / capacity / takt formulas."},
 }
 
-# L0 flow edges (for the top-level diagram).
+# L0 flow edges. Input flows DOWN; results flow UP through the action layer to the
+# chatbot. The action layer (outputs) is terminal — it is never on the input path.
 L0_EDGES = [
-    ("operator", "chatbot"), ("chatbot", "gov"), ("gov", "task"),
-    ("task", "gov"), ("gov", "chatbot"), ("chatbot", "operator"),
-    ("gov", "memory"), ("task", "memory"), ("gov", "outputs"),
+    ("operator", "chatbot"), ("chatbot", "gov"), ("gov", "task"), ("task", "gov"),
+    ("gov", "outputs"), ("outputs", "chatbot"), ("chatbot", "operator"),
+    ("gov", "memory"), ("task", "memory"),
 ]
 
 # What the inspector shows for each leaf (the "live dictionary / taxonomy / calc").
@@ -165,7 +182,7 @@ def breadcrumb(node_id: str) -> list[str]:
 # A block is an agent only where judgment lives; exact jobs stay tools.
 _AGENT_NODES = {"chatbot", "gov.coordinator", "gov.consistency",
                 "task.classifier", "task.classifier.brain"}
-_INTERFACE_NODES = {"operator", "outputs"}
+_INTERFACE_NODES = {"operator"}
 
 
 def has_brain(node_id: str) -> bool:
@@ -173,12 +190,14 @@ def has_brain(node_id: str) -> bool:
 
 
 def node_nature(node_id: str) -> str:
-    """One of: agent | tool | seam | group | interface | memory — for honest labelling."""
+    """One of: agent | tool | seam | group | interface | memory | output."""
     d = NODES[node_id]
     if not d["real"]:
         return "seam"
     if node_id == "memory" or node_id.startswith("memory."):
         return "memory"
+    if node_id.startswith("outputs."):
+        return "output"
     if node_id in _INTERFACE_NODES:
         return "interface"
     if node_id in _AGENT_NODES:

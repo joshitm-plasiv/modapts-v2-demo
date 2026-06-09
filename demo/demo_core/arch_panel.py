@@ -150,7 +150,8 @@ def render(activations: Optional[list[str]] = None, artifacts: Optional[dict] = 
         nat = ARCH.node_nature(focus)
         natlabel = {"agent": "agent · LLM brain", "tool": "deterministic tool",
                     "seam": "seam · not implemented", "group": "group",
-                    "interface": "interface", "memory": "memory level"}[nat]
+                    "interface": "interface", "memory": "memory level",
+                    "output": "deliverable"}[nat]
         st.markdown(f"**{d['label']}** — {natlabel}")
         st.caption(d["summary"])
 
@@ -167,7 +168,8 @@ def render(activations: Optional[list[str]] = None, artifacts: Optional[dict] = 
         for i, n in enumerate(drillable):
             nat = ARCH.node_nature(n)
             tag = {"agent": " · agent", "tool": " · tool", "seam": " · seam",
-                   "group": "", "interface": "", "memory": " · memory"}[nat]
+                   "group": "", "interface": "", "memory": " · memory",
+                   "output": " · output"}[nat]
             label = ARCH.NODES[n]["label"] + tag
             if bcols[i % len(bcols)].button(label, key=f"drill_{n}"):
                 st.session_state[_FOCUS_KEY] = n
