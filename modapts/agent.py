@@ -163,25 +163,31 @@ class ClassifierAgent:
         return out
 
     # ── sensitivity sweep ───────────────────────────────────────────────────────
-    def sweep(self, text: str, event_index: int, field: str, values: list) -> dict:
+    def sweep(self, text: str, event_index: int, field: str, values: list,
+              standard: str = "MODAPTS") -> dict:
         """Sensitivity analysis: one interpretation, vary one fact, re-derive the code/
-        time for each value. Wraps the engine's classify_sweep. MODAPTS is the headline;
-        the other standards are kept as labelled reference per row."""
+        time for each value. `standard` is the headline; the other standards are kept as
+        labelled reference per row. Wraps the engine's classify_sweep."""
+        if standard not in self.active_standards:
+            raise InactiveEngineError(
+                f"Standard '{standard}' is present but not active. "
+                f"Active: {list(self.active_standards)}.")
         res = orch.classify_sweep(text, event_index, field, values,
                                   config=self.config, interpret_fn=self.interpret_fn)
         rows = []
         for row in res.get("rows", []):
             eng = {r["standard"]: r for r in row["results"]}
-            mod = eng.get("MODAPTS", {})
+            head = eng.get(standard) or eng.get("MODAPTS") or next(iter(eng.values()), {})
             rows.append({
                 "value": row["value"], "baseline": row.get("baseline", False),
-                "code_sequence": mod.get("code_sequence"),
-                "total_native": mod.get("total_native"),
-                "total_seconds": mod.get("total_seconds"),
-                "reference": {s: e["total_seconds"] for s, e in eng.items() if s != "MODAPTS"},
+                "code_sequence": head.get("code_sequence"),
+                "total_native": head.get("total_native"),
+                "unit": head.get("unit"),
+                "total_seconds": head.get("total_seconds"),
+                "reference": {s: e["total_seconds"] for s, e in eng.items() if s != standard},
             })
         return {
-            "agent": "classifier", "kind": "sensitivity", "field": field,
+            "agent": "classifier", "kind": "sensitivity", "field": field, "standard": standard,
             "event_index": event_index, "baseline_value": res.get("baseline_value"),
             "interpreted_action": res.get("interpreted_action"),
             "needs_clarification": res.get("needs_clarification", False),
