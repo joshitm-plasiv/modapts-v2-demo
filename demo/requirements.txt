@@ -4,7 +4,8 @@
 # (Or `pip install -e .` from the repo root to install `modapts` on the path.)
 
 streamlit>=1.32          # UI (verified working on 1.58)
-anthropic>=0.30          # live LLM path, via modapts/adapter.py (matches the repo pin)
+anthropic>=0.30          # live LLM path (Anthropic provider), via modapts/adapter.py
+google-genai>=1.0        # optional — only if you pick the Gemini provider (unified Google SDK)
 
 # Optional — the clickable Tier-2 graph. If absent, the panel falls back to an SVG
 # view and the drill-in buttons still work.

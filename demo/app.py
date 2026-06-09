@@ -54,14 +54,28 @@ def _build_runtime(model: str, has_key: bool):
     return True  # marker; real objects are built per-run below to bind session memory
 
 
+_DEFAULT_MODEL = {"anthropic": "claude-sonnet-4-6", "gemini": "gemini-2.5-flash"}
+_PROVIDER_ENV = {"anthropic": ("ANTHROPIC_API_KEY", "MODAPTS_API_KEY"),
+                 "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY")}
+
+
 def _make_config():
-    key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MODAPTS_API_KEY")
+    """Build the live-LLM config from the sidebar selection (session only), else env.
+    Returns (AdapterConfig|None, model|None); None => keyless."""
+    provider = (st.session_state.get("llm_provider") or "anthropic").lower()
+    if provider not in _DEFAULT_MODEL:
+        provider = "anthropic"
+    key = (st.session_state.get("user_api_key") or "").strip()
+    if not key:
+        for ev in _PROVIDER_ENV[provider]:
+            key = key or (os.environ.get(ev) or "")
     if not key:
         return None, None
+    model = ((st.session_state.get("user_model") or "").strip()
+             or os.environ.get("DEMO_MODEL") or _DEFAULT_MODEL[provider])
     try:
         from modapts.adapter import AdapterConfig
-        model = os.environ.get("DEMO_MODEL", "claude-sonnet-4-6")
-        return AdapterConfig(provider="anthropic", model=model, api_key=key), model
+        return AdapterConfig(provider=provider, model=model, api_key=key), model
     except Exception:
         return None, None
 
@@ -153,17 +167,47 @@ def _feedback_panel():
                        ". Future measurements of this object auto-apply it.")
 
 
+# ── Mode / key entry ─────────────────────────────────────────────────────────────
+# Lets a viewer of a hosted (public) demo supply THEIR OWN key for live mode. The key
+# is never embedded in code or persisted — it lives in this browser session's memory
+# only. Blank = keyless (deterministic). This is why a public link costs you nothing:
+# each user pays for their own calls.
+with st.sidebar:
+    st.subheader("Mode")
+    st.radio("LLM provider", ["anthropic", "gemini"], key="llm_provider", horizontal=True,
+             format_func=lambda p: {"anthropic": "Anthropic", "gemini": "Gemini"}[p])
+    prov = (st.session_state.get("llm_provider") or "anthropic").lower()
+    st.text_input(
+        "API key (optional)", type="password", key="user_api_key",
+        placeholder="blank = keyless",
+        help="Key for the selected provider (Anthropic or Gemini). Held in this session's "
+             "memory only — never stored, logged, written to the repo, or shared. Blank = keyless.",
+    )
+    st.text_input(
+        "Model (optional)", key="user_model", placeholder=_DEFAULT_MODEL[prov],
+        help="Override the model string. Blank uses the provider default. These strings move "
+             "fast — verify against the provider's current model list.",
+    )
+    _cfg, _model = _make_config()
+    if _cfg is not None:
+        st.success(f"Live · {prov} · `{_model}`")
+    else:
+        st.info("Keyless · deterministic stubs for the LLM parts")
+    st.caption("On a public link, use a key with a spend limit — or run locally for full control.")
+
+
 # ── Layout ──────────────────────────────────────────────────────────────────────
 left, right = st.columns([5, 4], gap="large")
 
 with left:
     st.title("Agentic digital twin")
     _, _, _, _, cfg, model = _runtime()
+    _prov = (st.session_state.get("llm_provider") or "anthropic").lower()
     if cfg is not None:
-        st.caption(f"🟢 Live LLM mode · model `{model}` (interpretation + judge use the LLM)")
+        st.caption(f"🟢 Live LLM mode · {_prov} · model `{model}` (interpretation + judge use the LLM)")
     else:
         st.caption("⚪ Keyless mode · deterministic interpreter + heuristic judge "
-                   "(set ANTHROPIC_API_KEY for the real LLM)")
+                   "(pick a provider + key in the sidebar for live LLM)")
 
     with st.expander("Try one of the 10 demo commands", expanded=True):
         ecols = st.columns(3)

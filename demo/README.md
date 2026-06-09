@@ -23,9 +23,19 @@ streamlit run demo/app.py
 
 - **Keyless (default):** runs on a deterministic interpreter + heuristic judge — no
   key, fully offline. The screw-nut operation reproduces the real POR value (2.322 s).
-- **Live LLM (optional):** set `ANTHROPIC_API_KEY` to use the real LLM for
-  interpretation and the judge. Override the model with `DEMO_MODEL`
-  (default `claude-sonnet-4-6` — a volatile string; verify against the models doc).
+- **Live LLM (optional):** provide an **Anthropic or Gemini** key and the four LLM
+  components (Classifier interpretation, Coordinator, Consistency, Judge) call the real
+  model. Pick the provider in the sidebar ("Mode → LLM provider"), then supply a key:
+  - **Sidebar field** (works anywhere, incl. a hosted public link): paste a key for the
+    selected provider. It's held in that browser session's memory only — never stored,
+    logged, or shared. Each viewer uses their own key, so a public link costs the host
+    nothing. Clear it to return to keyless.
+  - **Environment:** Anthropic → `ANTHROPIC_API_KEY`; Gemini → `GEMINI_API_KEY` (or
+    `GOOGLE_API_KEY`). A session-entered key takes precedence over the env var.
+  Override the model in the sidebar or with `DEMO_MODEL`. Defaults: Anthropic
+  `claude-sonnet-4-6`, Gemini `gemini-2.5-flash` — both volatile strings; verify against
+  each provider's current model list. (Gemini needs the `google-genai` package, included
+  in this folder's requirements; the adapter imports it lazily.)
 
 Headless check (no UI, no key):
 
