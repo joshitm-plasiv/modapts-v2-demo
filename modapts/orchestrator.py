@@ -230,6 +230,25 @@ def classify_all(text: str, config: Optional[dict] = None,
     return out
 
 
+def _sweep_pending(text: str, action: "InterpretedAction", swept_field: str) -> list[str]:
+    """pending_clarifications for a sensitivity sweep: keep a genuine 'cannot decompose'
+    flag and any OTHER unresolved-fact question, but DROP a clarification about the field
+    being swept — its base value is expected to be unstated precisely because the sweep
+    varies it across explicit values. (Distance is never lexicon-triggered, so distance
+    sweeps were unaffected; this fixes placement_accuracy sweeps on verbs like 'insert'.)"""
+    if action.needs_clarification:
+        return pending_clarifications(text, action)
+    qs: list[str] = []
+    for word, fact in lexicon.scan(text):
+        if fact == swept_field:
+            continue
+        if _fact_unresolved(fact, action.events):
+            q = _question_for(word, fact)
+            if q not in qs:
+                qs.append(q)
+    return qs
+
+
 def classify_sweep(text: str, event_index: int, field: str, values: list,
                    config: Optional[dict] = None, workcell: Optional[WorkcellModel] = None,
                    interpret_fn: Optional[InterpretFn] = None,
@@ -244,7 +263,8 @@ def classify_sweep(text: str, event_index: int, field: str, values: list,
     action = _fill_distance_backstop(interpret(text, config))
 
     # If the task itself can't be decomposed, sweeping is meaningless — surface once.
-    questions = pending_clarifications(text, action)
+    # Do NOT block on a clarification about the field being swept (see _sweep_pending).
+    questions = _sweep_pending(text, action, field)
     if questions:
         return {
             "interpreted_action": action.interpreted_action,
