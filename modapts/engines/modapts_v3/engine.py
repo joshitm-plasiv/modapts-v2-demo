@@ -151,6 +151,15 @@ class MODAPTSEngine:
                                   rule=f"weight {ev.object_weight_kg}kg -> {load}"))
         return steps
 
+    def _move_only(self, ev: NeutralEvent) -> list[Step]:
+        """A transport that does NOT end in a placement (carry / reposition): the move
+        element only, no place. PLACE already includes its own transport, so a separate
+        MOVE must not add a second placement."""
+        m, mnote = self._move_code(ev)
+        return [self._mk(f"move {ev.object or 'object'}", m,
+                         rule=f"transport -> {m} (move only, no placement)",
+                         assumption=mnote, variables={"distance_cm": ev.distance_cm})]
+
     def _motion_cycle(self, ev: NeutralEvent) -> list[Step]:
         # Crank present -> C4 per revolution (Rule 2 repetition multiplies).
         revs = int(ev.revolutions or 1)
@@ -187,8 +196,10 @@ class MODAPTSEngine:
         et = ev.event_type
         if et == EventType.ACQUIRE:
             return self._acquire(ev)
-        if et in (EventType.PLACE, EventType.MOVE):
+        if et == EventType.PLACE:
             return self._place(ev)
+        if et == EventType.MOVE:
+            return self._move_only(ev)
         if et in (EventType.MOTION_CYCLE, EventType.OPERATE_DEVICE, EventType.USE_TOOL):
             return self._motion_cycle(ev)
         if et == EventType.BODY_MOTION:
