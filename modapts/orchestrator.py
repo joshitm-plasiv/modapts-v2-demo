@@ -62,8 +62,23 @@ def _is_present(val) -> bool:
     return v not in ("n/a", "none", "", None)
 
 
+# sensing facts live on sensing_dependency (an enum value), not their own attribute
+_SENSING_FACTS = {"temperature", "weight", "fill", "integrity", "material", "state"}
+
+
 def _fact_unresolved(fact: str, events: list[NeutralEvent]) -> bool:
     """True if no event carries a concrete, *stated* value for `fact`."""
+    if fact in _SENSING_FACTS:
+        # A sensing property is an open question only when some event names it as a
+        # sensing dependency and it isn't flagged inferred — i.e. the interpreter judged
+        # the op truly depends on perceiving it. A bare trigger word with no dependency
+        # set is NOT unresolved (so it can't loop), and clearing the dependency to none
+        # resolves it. (check_plausibility is the primary gate for real dependencies.)
+        for ev in events:
+            sd = getattr(ev.sensing_dependency, "value", ev.sensing_dependency)
+            if sd == fact and "sensing_dependency" not in ev.inferred_fields:
+                return True
+        return False
     for ev in events:
         if _is_present(getattr(ev, fact, None)) and fact not in ev.inferred_fields:
             return False
@@ -187,8 +202,12 @@ def classify(text: str, standard: str, config: Optional[dict] = None,
              workcell: Optional[WorkcellModel] = None,
              interpret_fn: Optional[InterpretFn] = None,
              fact_overrides: Optional[list[dict]] = None,
-             clarification: Optional[dict] = None) -> EngineResult:
-    """Run one task through one standard. Same shape for every engine."""
+             clarification: Optional[dict] = None,
+             force_resolve: bool = False) -> EngineResult:
+    """Run one task through one standard. Same shape for every engine.
+    force_resolve=True skips the clarification gate (the caller has already answered a
+    clarification once) and proceeds with whatever defaults the pipeline applied — so an
+    unresolvable/ambiguous fact can never re-ask in a loop."""
     engine = ENGINE_REGISTRY.get(standard)
     if engine is None:
         raise ValueError(
@@ -198,10 +217,11 @@ def classify(text: str, standard: str, config: Optional[dict] = None,
     raw_action = _interpret_with(interpret_fn, text, config, clarification)
     action = _apply_fact_overrides(_fill_distance_backstop(raw_action), fact_overrides)
 
-    questions = pending_clarifications(text, action)
-    if questions:
-        return clarification_result(engine.standard, engine.unit,
-                                    action.interpreted_action, questions)
+    if not (force_resolve and action.events):
+        questions = pending_clarifications(text, action)
+        if questions:
+            return clarification_result(engine.standard, engine.unit,
+                                        action.interpreted_action, questions)
 
     result = engine.assemble(action.events, workcell)
     result.interpreted_action = action.interpreted_action

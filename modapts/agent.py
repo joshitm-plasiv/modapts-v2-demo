@@ -73,6 +73,10 @@ class ClassifierAgent:
         if not text:
             raise ValueError("ClassifierAgent.run requires task_package['text'].")
 
+        # force_resolve: the caller already answered a clarification once; do not gate/loop —
+        # interpret with the answer and proceed with whatever defaults the pipeline applies.
+        force_resolve = bool(task_package.get("force_resolve"))
+
         standard = task_package.get("standard") or self.active_standards[0]
         if standard not in self.active_standards:
             raise InactiveEngineError(
@@ -90,7 +94,7 @@ class ClassifierAgent:
         # If the interpretation is impossible (one item acquired/placed many times) or
         # depends on an unsensable property (temperature/weight/…), clarify — never code it.
         issues = check_plausibility(raw)
-        if issues:
+        if issues and not force_resolve:
             out = {
                 "agent": "classifier", "standard": standard, "needs_clarification": True,
                 "clarifying_questions": issues, "interpreted_action": raw.interpreted_action,
@@ -119,6 +123,7 @@ class ClassifierAgent:
             text, standard, config=self.config,
             interpret_fn=lambda t, c=None: raw,
             fact_overrides=overrides,
+            force_resolve=force_resolve,
         )
 
         if result.needs_clarification:
@@ -153,6 +158,12 @@ class ClassifierAgent:
         if task_package.get("compare"):
             out["cross_check"] = self._cross_reference(text, raw, overrides,
                                                        authoritative=standard)
+
+        # transparency: if we force-resolved, surface what we defaulted instead of re-asking
+        if force_resolve:
+            suppressed = orch.pending_clarifications(text, raw)
+            if suppressed:
+                out["forced_defaults"] = suppressed
 
         label = task_package.get("station_id") or _slug(text)
         self.memory.write(DYNAMIC, f"activity_time:{label}", {

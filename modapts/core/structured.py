@@ -127,6 +127,10 @@ def expand_steps(steps: list[dict]) -> tuple[list[NeutralEvent], list[str]]:
                 distance_cm=_num(s.get("distance_cm")),
                 placement_accuracy=_enum(PlacementAccuracy, s.get("placement_accuracy"),
                                          PlacementAccuracy.NA),
+                # a put's transport is free-air by default (carry to destination); in_contact
+                # only when the LLM states a slide/drag. Resolved here so the "move" lexicon
+                # trigger doesn't loop, and free-air is the standard General-Move default.
+                motion_path=_enum(MotionPath, s.get("motion_path"), MotionPath.FREE_AIR),
                 clearance_mm=_num(s.get("clearance_mm")), tolerance_mm=_num(s.get("tolerance_mm")),
                 force=_enum(Force, s.get("force"), Force.NONE),
                 sensing_dependency=_enum(SensingDependency, s.get("sensing_dependency"),

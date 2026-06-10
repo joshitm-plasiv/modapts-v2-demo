@@ -33,6 +33,8 @@ The two handling ops are the only way to move objects:
          fields: object, distance_cm (transport distance),
                  placement_accuracy: approximate | loose | tight,
                  force: none | apply_pressure | extra_force,
+                 motion_path: free_air | in_contact  (default free_air; use in_contact ONLY
+                              when the object is slid/dragged/pushed along a surface),
                  sensing_dependency: none | temperature | weight | fill | integrity | material | state
 
 Non-handling ops (use only when described): use_tool {object, tool, revolutions},
