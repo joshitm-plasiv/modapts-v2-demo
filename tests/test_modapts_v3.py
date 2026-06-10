@@ -29,6 +29,13 @@ def test_screw_insert_matches_legacy():
     assert r.unit == "MOD"
 
 
+# ── a bare MOVE is transport-only — no fabricated placement (root-fix guard) ──
+def test_move_event_is_transport_only():
+    r = E.assemble([NeutralEvent(event_type=EventType.MOVE, object="tray", distance_cm=30)])
+    assert r.code_sequence == "M4"        # move element only; no P-class added
+    assert r.total_native == 4
+
+
 # ── E2 charged ONLY before high-conscious-control terminals (Rule 3) ──────────
 def test_e2_only_for_high_control():
     # simple grasp (G1) + loose place (P2 needs E2; P0 does not)

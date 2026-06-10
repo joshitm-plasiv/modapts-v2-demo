@@ -48,9 +48,38 @@ def test_parse_rejects_bad_json():
         parse_response("not json at all")
 
 
-def test_parse_rejects_missing_events():
-    with pytest.raises(ValueError, match="missing 'events'"):
+def test_parse_rejects_missing_steps():
+    # the structured contract requires "steps" (legacy "events" is accepted as a fallback)
+    with pytest.raises(ValueError, match="missing 'steps'"):
         parse_response(json.dumps({"interpreted_action": "x"}))
+
+
+def test_parse_expands_structured_steps():
+    # GET/PUT intent expands to exactly one ACQUIRE + one PLACE (the engine folds the
+    # transport into the placement), so the model cannot over-emit moves/places
+    raw = json.dumps({
+        "interpreted_action": "get screw; insert screw",
+        "steps": [
+            {"op": "get", "object": "screw", "distance_cm": 15, "source_state": "jumbled"},
+            {"op": "put", "object": "screw", "distance_cm": 15, "placement_accuracy": "tight"},
+        ],
+    })
+    act = parse_response(raw)
+    assert [e.event_type for e in act.events] == [EventType.ACQUIRE, EventType.PLACE]
+    assert act.events[0].source_state == SourceState.JUMBLED
+    assert act.events[1].placement_accuracy == PlacementAccuracy.TIGHT
+
+
+def test_parse_collapses_duplicate_put():
+    # one seat split into two puts collapses to a single placement (most-controlled fit)
+    raw = json.dumps({"interpreted_action": "seat part", "steps": [
+        {"op": "get", "object": "part", "distance_cm": 20},
+        {"op": "put", "object": "part", "distance_cm": 20, "placement_accuracy": "loose"},
+        {"op": "put", "object": "part", "distance_cm": 20, "placement_accuracy": "tight"},
+    ]})
+    act = parse_response(raw)
+    places = [e for e in act.events if e.event_type == EventType.PLACE]
+    assert len(places) == 1 and places[0].placement_accuracy == PlacementAccuracy.TIGHT
 
 
 def test_system_prompt_is_facts_not_codes():
