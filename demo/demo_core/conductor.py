@@ -147,7 +147,11 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
     step("chatbot", "chatbot (agent)", "receive", "interpret + decompose into a plan")
 
     if clarification:
-        plan = {"steps": [{"tool": "classify", "text": text}], "note": "clarified re-measure"}
+        steps = [{"tool": "classify", "text": text,
+                  "station_id": clarification.get("station_id")}]
+        if clarification.get("line"):     # re-thread the new time into the dependent line
+            steps.append({"tool": "line_balance", "line": clarification["line"]})
+        plan = {"steps": steps, "note": "clarified re-measure"}
     else:
         planner = plan_fn or make_plan
         try:
@@ -181,11 +185,19 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                 sections.append(lead + qs)
                 step(node, "classifier (agent)", "blocked", "clarification needed")
                 feed = s.get("feeds") or s.get("station_id")
+                clarify_ctx = {"text": s["text"], "question": qs,
+                               "standard": res.get("standard", standard)}
                 if feed:
                     pending_feeds[feed] = qs
-                else:                              # resumable — including plausibility/sensing blocks
-                    clarify_ctx = {"text": s["text"], "question": qs,
-                                   "standard": res.get("standard", standard)}
+                    clarify_ctx["station_id"] = feed
+                    # find a dependent line_balance in this plan that uses the fed station,
+                    # so answering the clarification re-threads the new time into that line
+                    for st2 in plan.get("steps", []):
+                        if st2.get("tool") == "line_balance" and por:
+                            ln = por.get_line(st2.get("line"))
+                            if ln and any(stn.station_id == feed for stn in ln.stations):
+                                clarify_ctx["line"] = st2.get("line")
+                                break
             else:
                 ref = ""
                 if res.get("cross_check"):
@@ -285,6 +297,21 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                                     "≤2.5 M1 · ≤5 M2 · ≤15 M3 · ≤30 M4 · ≤45 M5 · >45 M7. "
                                     "Nearest-nominal would pick the lower class for ~16–22 cm "
                                     "(M3 not M4) and ~31–37 cm (M4 not M5)._")
+                elif sw["field"] == "placement_accuracy":
+                    sections.append("_Placement fit → P-class (a convention): approximate → P0 "
+                                    "(no positioning) · loose → P2 · tight → P5; E2 precedes "
+                                    "P2/P5. Reach and grasp are held constant._")
+                # surface what the base operation assumed, so the sweep's held-constant facts
+                # aren't silent (the gap the single-classify derivation otherwise closes)
+                assumed = []
+                if isinstance(last_interpretation, dict):
+                    for ev in last_interpretation.get("events", []):
+                        a = ev.get("assumption")
+                        if a:
+                            assumed.append(a)
+                if assumed:
+                    sections.append("_Assumed in the base operation (held constant): "
+                                    + "; ".join(dict.fromkeys(assumed)) + "._")
                 recommendation = recommendation or f"The time hinges on {sw['field']} — pin it down."
                 step(node, "classifier (agent)", "sensitivity sweep",
                      f"{sw['field']} × {len(sw['rows'])}")

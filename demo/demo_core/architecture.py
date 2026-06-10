@@ -27,8 +27,10 @@ NODES: dict[str, dict] = {
                   "summary": "Coordinates, routes, accumulates, verifies, packages. A team of agents."},
     "task":      {"label": "Task layer", "parent": None, "kind": "task", "real": True,
                   "summary": "The task agents that do the work."},
-    "memory":    {"label": "Memory (4js)", "parent": None, "kind": "memory", "real": False,
-                  "summary": "External memory service (seam). The demo uses a session-scoped stand-in."},
+    "memory":    {"label": "Memory (session)", "parent": None, "kind": "memory", "real": True,
+                  "summary": "Session-scoped memory: corrections, taught facts and accepted "
+                             "codes persist across turns this session (cleared on reload). No "
+                             "external/durable backend is wired."},
     "outputs":   {"label": "Outputs (action layer)", "parent": None, "kind": "io", "real": True,
                   "summary": "What the system delivers, reported UP to the chatbot. Terminal — "
                              "produced last by Packaging; never in the input path. Only the answer "

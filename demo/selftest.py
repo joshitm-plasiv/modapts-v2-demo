@@ -168,7 +168,7 @@ def t_arch():
     assert ARCH.node_nature("task.classifier") == "agent"
     assert ARCH.node_nature("task.des") == "seam"          # DES is a seam (not implemented)
     assert ARCH.NODES["task.des"]["real"] is False
-    assert ARCH.NODES["memory"]["real"] is False           # 4js is an external seam here
+    assert ARCH.NODES["memory"]["real"] is True            # real session-scoped store (no 4js)
 
 
 # ── 7. sweep / clarification fixes ────────────────────────────────────────────
@@ -300,7 +300,7 @@ def t_fewshot():
     block = clf._fewshot_block()
     assert "pick a screw and insert it" in block and "M3+E2+G3+M3+E2+P5" in block, block
     sys = _compose_system(block)
-    assert "OPERATOR-ACCEPTED EXAMPLES" in sys and block in sys and len(sys) > len(SYSTEM_PROMPT)
+    assert "USER-ACCEPTED EXAMPLES" in sys and block in sys and len(sys) > len(SYSTEM_PROMPT)
     assert _compose_system("") == SYSTEM_PROMPT       # no examples → base prompt unchanged
 
 
@@ -454,6 +454,79 @@ def t_sensing_resumable():
     assert not resolved.get("clarify") and "2.451" in resolved["answer"], resolved["answer"]
 
 
+@check("structured intent: GET/PUT expands to one move + one place per put (no over-coding)")
+def t_structured():
+    from modapts.core.structured import expand_steps
+    from modapts.engines.modapts_v3.engine import MODAPTSEngine
+    eng = MODAPTSEngine()
+
+    def price(steps):
+        events, notes = expand_steps(steps)
+        r = eng.assemble(events)
+        return " + ".join(s.code for s in r.steps if s.code), r.total_native, notes
+
+    # the three operations that were over-coded in the live trace, now correct
+    seq, mod, _ = price([{"op": "get", "object": "head-stack", "distance_cm": 30,
+                          "source_state": "by_itself"},
+                         {"op": "put", "object": "head-stack", "distance_cm": 30,
+                          "placement_accuracy": "tight"}])
+    assert seq == "M4 + G1 + M4 + E2 + P5" and mod == 16, (seq, mod)
+    seq, mod, _ = price([{"op": "get", "object": "screw", "distance_cm": 15,
+                          "source_state": "jumbled"},
+                         {"op": "put", "object": "screw", "distance_cm": 15,
+                          "placement_accuracy": "tight"}])
+    assert seq == "M3 + E2 + G3 + M3 + E2 + P5" and mod == 18, (seq, mod)
+
+    # validator backstop: two puts on one object collapse to one (most-controlled)
+    seq, mod, notes = price([{"op": "get", "object": "screw", "distance_cm": 15,
+                              "source_state": "jumbled"},
+                             {"op": "put", "object": "screw", "distance_cm": 15,
+                              "placement_accuracy": "loose"},
+                             {"op": "put", "object": "screw", "distance_cm": 15,
+                              "placement_accuracy": "tight"}])
+    assert mod == 18 and notes, (seq, mod, notes)
+
+    # a bare MOVE is transport-only — no fabricated placement
+    from modapts.core.neutral import NeutralEvent, EventType
+    r = eng.assemble([NeutralEvent(event_type=EventType.MOVE, object="tray", distance_cm=30)])
+    assert [s.code for s in r.steps if s.code] == ["M4"], [s.code for s in r.steps]
+
+
+@check("feed threading: answering a fed clarification re-measures AND re-threads into the line")
+def t_feed_resume():
+    def m(text, config=None, clarification=None):
+        if not clarification:                       # turn 1: source unstated -> gate
+            return IA.from_dict({"interpreted_action": "grab part and press",
+                "events": [{"event_type": "acquire", "object": "part", "distance_cm": 20},
+                           {"event_type": "place", "object": "part", "distance_cm": 20,
+                            "placement_accuracy": "loose"}]})
+        return IA.from_dict({"interpreted_action": "grab part (jumbled) and press",  # turn 2: resolved
+            "events": [{"event_type": "acquire", "object": "part", "distance_cm": 20,
+                        "source_state": "jumbled"},
+                       {"event_type": "place", "object": "part", "distance_cm": 20,
+                        "placement_accuracy": "loose"}]})
+    por = load_por_xlsx(SAMPLE)
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    plan = lambda t, p, c: {"steps": [
+        {"tool": "classify", "text": "grab the part from a bin and press it in",
+         "station_id": "SMT-05", "feeds": "SMT-05"},
+        {"tool": "line_balance", "line": "PCB Stuffing Assembly"}], "note": ""}
+
+    t1 = C.run("x", por, clf, config=None, plan_fn=plan)
+    cc = t1["clarify"]
+    assert "pending" in t1["answer"].lower(), t1["answer"]
+    assert cc and cc.get("station_id") == "SMT-05" and cc.get("line") == "PCB Stuffing Assembly", cc
+
+    t2 = C.run(cc["text"], por, clf, config=None,
+               clarification={"question": cc["question"], "answer": "jumbled",
+                              "station_id": cc["station_id"], "line": cc["line"]})
+    meas = [r for r in t2["artifacts"]["steps"] if r["tool"] == "classify"][0]["result"]["total_seconds"]
+    bal = [r for r in t2["artifacts"]["steps"] if r["tool"] == "line_balance"]
+    assert bal, "dependent line_balance did not re-run on the clarification answer"
+    ct = next(st["cycle_time_s"] for st in bal[0]["result"]["stations"] if st["station_id"] == "SMT-05")
+    assert ct == meas and ct != 40.5, (ct, meas)
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
@@ -462,7 +535,8 @@ if __name__ == "__main__":
                t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback,
                t_fewshot, t_no_por, t_clarify_loop, t_history_passthrough,
                t_learn_step, t_code_edit_step, t_sensitivity_explicit,
-               t_derivation, t_sensitivity_fidelity, t_explain, t_sensing_resumable):
+               t_derivation, t_sensitivity_fidelity, t_explain, t_sensing_resumable,
+               t_structured, t_feed_resume):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)

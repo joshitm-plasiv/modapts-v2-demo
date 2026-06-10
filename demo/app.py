@@ -140,7 +140,9 @@ def _run(command: str):
         # The user is answering a prior 'needs clarification' — thread it into a single
         # re-measure of the SAME operation, rather than re-planning the reply as a new command.
         result = C.run(pend["text"], por, classifier, config, standard=pend["standard"],
-                       clarification={"question": pend["question"], "answer": command})
+                       clarification={"question": pend["question"], "answer": command,
+                                      "station_id": pend.get("station_id"),
+                                      "line": pend.get("line")})
     else:
         result = C.run(command, por, classifier, config, standard=_selected_standard(),
                        history=_history_text(), last_interpretation=last_interp,
