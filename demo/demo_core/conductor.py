@@ -40,6 +40,34 @@ def _station_in_text(text: str, por) -> Optional[str]:
     return None
 
 
+def _valid_station(cand, por) -> Optional[str]:
+    """Return the candidate only if it is a REAL POR station id (a line name is not a
+    station). Guards against a planner that mis-fills the station field."""
+    if not cand or por is None:
+        return None
+    c = str(cand).strip().lower()
+    try:
+        for s in por.all_stations():
+            if s.station_id and s.station_id.lower() == c:
+                return s.station_id
+    except Exception:
+        return None
+    return None
+
+
+def _resolve_station(step: dict, command_text: str, por) -> Optional[str]:
+    """Resolve the station a classify is about, robust to a planner that mis-fills the
+    station field. Prefer an explicit feeds/station_id that is a real POR station; else a
+    station id named in the operation text or in the original command. Without a POR there
+    is nothing to thread into, so just echo an explicit value for display."""
+    if por is None:
+        return step.get("feeds") or step.get("station_id")
+    return (_valid_station(step.get("feeds"), por)
+            or _valid_station(step.get("station_id"), por)
+            or _station_in_text(step.get("text", ""), por)
+            or _station_in_text(command_text, por))
+
+
 def _price_code(code_str: str) -> dict:
     """Validate and PRICE a user-dictated MODAPTS code so a code edit shows its time, not
     just a recorded string. Each token is checked against the dictionary (existing validator):
@@ -192,10 +220,10 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                 pkg["clarification"] = clarification
             res = classifier.run(pkg)
             step_results.append({"tool": tool, "text": s["text"], "result": res})
-            # link this measure to a station even when the planner didn't: explicit
-            # feeds/station_id first, else a station id named in the command text
-            station = (s.get("feeds") or s.get("station_id")
-                       or _station_in_text(s.get("text", ""), por))
+            # link this measure to a REAL station, robust to a planner that mis-fills the
+            # station field (e.g. a line name) or omits it: validate against the POR, and
+            # fall back to a station id named in the operation text or the original command
+            station = _resolve_station(s, text, por)
             if res.get("needs_clarification"):
                 qs = " ".join(res.get("clarifying_questions", []))
                 if res.get("plausibility_block"):

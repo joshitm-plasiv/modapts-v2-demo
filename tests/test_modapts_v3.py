@@ -36,6 +36,12 @@ def test_move_event_is_transport_only():
     assert r.total_native == 4
 
 
+# ── a nested part must be separated -> complex get (G3), like a jumbled one ───
+def test_nested_get_is_complex():
+    r = E.assemble([_acquire(object="part", source_state=SourceState.NESTED, distance_cm=20)])
+    assert r.code_sequence == "M4 + E2 + G3"      # G3 with its E2, not a simple G1
+
+
 # ── E2 charged ONLY before high-conscious-control terminals (Rule 3) ──────────
 def test_e2_only_for_high_control():
     # simple grasp (G1) + loose place (P2 needs E2; P0 does not)

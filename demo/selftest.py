@@ -582,6 +582,28 @@ def t_sweep_assumptions_gated():
     assert NOTE in o2["answer"], "reuse sweep should surface the base assumptions"
 
 
+@check("station resolution: a line-name mis-filled in the station field is ignored; id resolves from the command")
+def t_station_resolution_robust():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "grab component and press",
+            "events": [{"event_type": "acquire", "object": "component", "distance_cm": 20,
+                        "source_state": "jumbled"},
+                       {"event_type": "place", "object": "component", "distance_cm": 20,
+                        "placement_accuracy": "loose"}]})
+    por = load_por_xlsx(SAMPLE)
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    # planner mis-fills station_id with a LINE NAME; the real id (SMT-05) is in the command
+    plan = lambda t, p, c: {"steps": [
+        {"tool": "classify", "text": "grab the component and press it in",
+         "station_id": "PCB Stuffing Assembly"},
+        {"tool": "line_balance", "line": "PCB Stuffing Assembly"}], "note": ""}
+    out = C.run("we replaced the insert at SMT-05; grab the component and press it in",
+                por, clf, config=None, plan_fn=plan)
+    bal = [r for r in out["artifacts"]["steps"] if r["tool"] == "line_balance"][0]["result"]
+    ct = next(s["cycle_time_s"] for s in bal["stations"] if s["station_id"] == "SMT-05")
+    assert ct != 40.5, ct          # resolved SMT-05 from the command, ignored the line-name
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
@@ -591,7 +613,8 @@ if __name__ == "__main__":
                t_fewshot, t_no_por, t_clarify_loop, t_history_passthrough,
                t_learn_step, t_code_edit_step, t_sensitivity_explicit,
                t_derivation, t_sensitivity_fidelity, t_explain, t_sensing_resumable,
-               t_structured, t_feed_resume, t_autolink_feed, t_sweep_assumptions_gated):
+               t_structured, t_feed_resume, t_autolink_feed, t_sweep_assumptions_gated,
+               t_station_resolution_robust):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
