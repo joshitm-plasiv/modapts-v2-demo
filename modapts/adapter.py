@@ -92,6 +92,27 @@ def call_llm(system_prompt: str, user_message: str, config: Optional[AdapterConf
     return handler(system_prompt, user_message, config)
 
 
+def validate_config(config: Optional[AdapterConfig]) -> tuple[bool, str]:
+    """Cheap liveness check: confirm the key authenticates and the model is reachable,
+    so a typo'd or fake key is caught the moment it's entered rather than on the first
+    real query. Makes one tiny call. Never raises — returns (ok, human message)."""
+    if config is None or not getattr(config, "api_key", None):
+        return False, "No API key entered."
+    try:
+        call_llm("Reply with the single word: ok", "ok", config)
+        return True, f"{config.provider} · {config.model} reachable"
+    except Exception as e:
+        low = (type(e).__name__ + " " + str(e)).lower()
+        if any(w in low for w in ("auth", "401", "unauthorized", "x-api-key",
+                                  "permission", "invalid api", "api_key")):
+            return False, "Key rejected by the provider — check the key."
+        if any(w in low for w in ("notfound", "not_found", "404", "model")):
+            return False, f"Model '{config.model}' not reachable for {config.provider}."
+        if any(w in low for w in ("rate", "429", "overload", "529")):
+            return True, f"{config.provider} reachable (rate-limited right now, key is valid)"
+        return False, f"Couldn't reach {config.provider}: {str(e)[:100]}"
+
+
 def _call_anthropic(system_prompt: str, user_message: str, config: AdapterConfig) -> str:
     try:
         import anthropic

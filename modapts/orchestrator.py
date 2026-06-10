@@ -37,7 +37,7 @@ def _llm_interpret(text: str, config: Optional[dict] = None,
                    examples: Optional[str] = None) -> InterpretedAction:
     """text -> neutral facts via the LLM. Lazy import keeps orchestrator import
     light and decoupled from the adapter/interpreter; still injectable via interpret_fn.
-    `examples` is an optional operator-accepted few-shot block (the feedback loop)."""
+    `examples` is an optional user-accepted few-shot block (the feedback loop)."""
     from modapts.interpreter import interpret
     return interpret(text, config, clarification=clarification, examples=examples)
 
@@ -139,9 +139,9 @@ def _fill_distance_backstop(action: "InterpretedAction"):
 
 
 def _apply_fact_overrides(action: "InterpretedAction", overrides: Optional[list[dict]]):
-    """Patch event fields with operator corrections (deterministic — no LLM).
+    """Patch event fields with user corrections (deterministic — no LLM).
     `overrides` is a list aligned to event index, each a dict of {field: value} for
-    the facts the operator corrected (e.g. {"distance_cm": 20}). Enum fields accept
+    the facts the user corrected (e.g. {"distance_cm": 20}). Enum fields accept
     their string value. Unknown fields/indices are ignored. Returns a new action."""
     if not overrides:
         return action
@@ -173,8 +173,8 @@ def _apply_fact_overrides(action: "InterpretedAction", overrides: Optional[list[
                     pass
             else:
                 setattr(ev, field, val)
-        # mark as operator-corrected so the audit/assumption can reflect it
-        note = "operator-corrected: " + ", ".join(f"{k}={v}" for k, v in patch.items() if v is not None)
+        # mark as user-corrected so the audit/assumption can reflect it
+        note = "user-corrected: " + ", ".join(f"{k}={v}" for k, v in patch.items() if v is not None)
         ev.assumption = note if not ev.assumption else f"{ev.assumption}; {note}"
     return InterpretedAction(
         interpreted_action=action.interpreted_action, events=events,
@@ -277,13 +277,13 @@ def classify_sweep(text: str, event_index: int, field: str, values: list,
         }
 
     # Baseline: the value the swept fact already had in the (un-swept) interpretation.
-    # Operator can read every swept value against the original assumption.
+    # User can read every swept value against the original assumption.
     base_ev = action.events[event_index] if 0 <= event_index < len(action.events) else None
     baseline_val = getattr(base_ev, field, None) if base_ev is not None else None
     if hasattr(baseline_val, "value"):          # enum -> its string
         baseline_val = baseline_val.value
 
-    # Build the full value list: baseline first (deduped), then the operator's values.
+    # Build the full value list: baseline first (deduped), then the user's values.
     def _norm(x):
         try:
             return float(x)

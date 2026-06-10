@@ -47,9 +47,17 @@ not support a value — do NOT invent values):
                    from the text (be honest — this drives ambiguity flagging)
   assumption: short note, or null
 
-If an action depends on a property the operator must determine but a default motion
-cannot sense (e.g. "if hot"), set sensing_dependency and leave the dependent coding
-to clarification — do not fabricate a sensing motion.
+SENSING vs PLACEMENT (read carefully): set sensing_dependency to a non-none value ONLY
+when the described task includes an explicit step of PERCEIVING or VERIFYING a property
+the coded motions cannot establish — reading a gauge or label, judging temperature ("if
+hot"), checking a fill level, or a pass/fail inspection. A tight / precise / snug FIT is
+placement_accuracy = tight, NOT sensing. A delicate or named component (e.g. "head-stack
+assembly") is NOT, by itself, a sensing dependency. If a clarification says there is no
+such check (or the property is known in advance / from a label), set sensing_dependency =
+none and code the motions normally. When in genuine doubt, prefer sensing_dependency =
+none and code the physical motion rather than blocking — only block when the text plainly
+requires perceiving something the motions can't establish. When you do set it, leave the
+dependent coding to clarification and do not fabricate a sensing motion.
 
 DISTANCE / PLACEMENT (important for cross-standard consistency): for every acquire,
 move, and place event, ALWAYS provide a numeric distance_cm and (for place) a
@@ -92,14 +100,14 @@ def parse_response(raw: str) -> InterpretedAction:
 
 
 def _compose_system(examples: Optional[str] = None) -> str:
-    """Base interpreter prompt, optionally augmented with operator-accepted few-shot
+    """Base interpreter prompt, optionally augmented with user-accepted few-shot
     examples. This is how the feedback loop teaches the interpreter (the facts layer),
     not just the code output."""
     if not examples:
         return SYSTEM_PROMPT
     return (SYSTEM_PROMPT
             + "\n\n## OPERATOR-ACCEPTED EXAMPLES\n"
-            + "An operator has confirmed these classifications. For operations like these, "
+            + "An user has confirmed these classifications. For operations like these, "
             + "produce neutral facts consistent with the accepted result:\n" + examples)
 
 
@@ -108,7 +116,7 @@ def interpret(text: str, config: Optional[AdapterConfig] = None,
               clarification: Optional[dict] = None,
               examples: Optional[str] = None) -> InterpretedAction:
     """text -> NeutralEvent facts via the LLM, with one retry on parse failure.
-    If `clarification` ({question, answer}) is supplied, the operator's answer is
+    If `clarification` ({question, answer}) is supplied, the user's answer is
     appended to the user message so the LLM resolves the prior ambiguity and does
     NOT re-ask the same question."""
     user_msg = text
