@@ -87,3 +87,16 @@ def test_system_prompt_is_facts_not_codes():
     assert "never" in SYSTEM_PROMPT.lower()
     assert "sensing_dependency" in SYSTEM_PROMPT
     assert "inferred_fields" in SYSTEM_PROMPT
+
+
+def test_lexicon_facts_are_resolvable():
+    # every clarification fact must map to something the pipeline can actually set —
+    # otherwise answering it can loop forever (the motion_path / sensing class of bug)
+    from modapts.core.lexicon import AMBIGUOUS_TRIGGERS, SENSING_TRIGGERS
+    from modapts.orchestrator import _SENSING_FACTS
+    from modapts.core.neutral import NeutralEvent, EventType
+    ev = NeutralEvent(event_type=EventType.PLACE)
+    for fact in set(AMBIGUOUS_TRIGGERS.values()):
+        assert hasattr(ev, fact), f"ambiguous fact '{fact}' is not a NeutralEvent field"
+    for fact in set(SENSING_TRIGGERS.values()):
+        assert fact in _SENSING_FACTS, f"sensing fact '{fact}' not handled by _fact_unresolved"
