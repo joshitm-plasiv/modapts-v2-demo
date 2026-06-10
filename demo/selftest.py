@@ -107,8 +107,8 @@ def t_conductor_thread():
     # both tools ran, in order
     assert "task.classifier" in out["activations"], out["activations"]
     assert "task.balancer" in out["activations"], out["activations"]
-    # the flow is an ordered path operator→chatbot→coordinator→…→outputs→chatbot
-    assert out["flow"][0] == "operator" and out["flow"][-1] == "chatbot", out["flow"]
+    # the flow is an ordered path user→chatbot→coordinator→…→outputs→chatbot
+    assert out["flow"][0] == "user" and out["flow"][-1] == "chatbot", out["flow"]
     assert out["flow"].index("task.classifier") < out["flow"].index("task.balancer")
     # threading: the balance step used the re-measured SMT-05 (2.322s) → bottleneck moved off SMT-05
     bal = [r for r in out["artifacts"]["steps"] if r["tool"] == "line_balance"][0]["result"]
@@ -163,7 +163,7 @@ def t_inactive():
 # ── 6. architecture model integrity ───────────────────────────────────────────
 @check("architecture: L0 is branched; task fans into classifier + balancer + DES")
 def t_arch():
-    assert set(ARCH.l0_nodes()) == {"operator", "chatbot", "gov", "task", "memory", "outputs"}
+    assert set(ARCH.l0_nodes()) == {"user", "chatbot", "gov", "task", "memory", "outputs"}
     assert ARCH.children_of("task") == ["task.classifier", "task.balancer", "task.des"]
     assert ARCH.node_nature("task.classifier") == "agent"
     assert ARCH.node_nature("task.des") == "seam"          # DES is a seam (not implemented)
@@ -295,7 +295,7 @@ def t_fewshot():
     clf = make_classifier(memory=mem, interpret_fn=lambda t, c=None, clarification=None: IA.from_dict(SCREW))
     clf.add_example("pick a screw and insert it", "M3+E2+G3+M3+E2+P5",
                     facts=[{"event_type": "place", "object": "screw", "placement_accuracy": "tight"}],
-                    standard="MODAPTS", kind="code_edit", note="operator")
+                    standard="MODAPTS", kind="code_edit", note="user")
     assert len(clf.examples()) == 1
     block = clf._fewshot_block()
     assert "pick a screw and insert it" in block and "M3+E2+G3+M3+E2+P5" in block, block
@@ -343,8 +343,8 @@ def t_history_passthrough():
         seen["history"] = history
         return {"steps": [], "note": "ok"}
     C.run("follow up", None, _clf(), config=None, plan_fn=plan,
-          history="operator: measure a screw")
-    assert seen["history"] == "operator: measure a screw", seen
+          history="user: measure a screw")
+    assert seen["history"] == "user: measure a screw", seen
 
 
 @check("conductor: a learn step persists a fact-correction and reports it")
@@ -360,15 +360,19 @@ def t_learn_step():
     assert "Learned" in out["answer"], out["answer"]
 
 
-@check("conductor: a code_edit step records a few-shot example and reports it")
+@check("conductor: a code_edit step PRICES the dictated code (shows MODs + time) and records it")
 def t_code_edit_step():
     clf = _clf()
     plan = lambda t, p, c, history=None: {"steps": [
         {"tool": "code_edit", "text": "pick a screw and insert it",
          "code": "M3+E2+G3+M3+E2+P5"}], "note": ""}
     out = C.run("set the code to M3+E2+G3+M3+E2+P5", None, clf, config=None, plan_fn=plan)
-    assert any(e.get("code") == "M3+E2+G3+M3+E2+P5" for e in clf.examples()), clf.examples()
-    assert out["corrections"] and "Recorded" in out["answer"], (out["corrections"], out["answer"])
+    # records the validated code (canonical spacing)
+    assert any(e.get("code", "").replace(" ", "") == "M3+E2+G3+M3+E2+P5"
+               for e in clf.examples()), clf.examples()
+    # prices it from the standard table and shows the time, not just a recorded string
+    assert "18 MOD" in out["answer"] and "2.322" in out["answer"], out["answer"]
+    assert out["corrections"] and "Recorded" in out["answer"]
 
 
 @check("conductor: sensitivity uses planner-supplied field/values (range expanded upstream)")
@@ -427,6 +431,29 @@ def t_explain():
     assert "derived" in out["answer"] and "reach to screw" in out["answer"], out["answer"]
 
 
+@check("plausibility/sensing block is resumable — answering it threads back and clears the block")
+def t_sensing_resumable():
+    class _Clf:                                    # blocks on sensing until a clarification arrives
+        def run(self, pkg):
+            if pkg.get("clarification"):
+                return {"code_sequence": "M4 + E2 + G3 + M3 + E2 + P5", "total_native": 19,
+                        "unit": "MOD", "total_seconds": 2.451,
+                        "interpreted_action": "seat head-stack (tight)", "neutral_events": [],
+                        "standard": "MODAPTS"}
+            return {"needs_clarification": True, "plausibility_block": True,
+                    "clarifying_questions": ["How is the integrity of 'head-stack' determined?"],
+                    "interpreted_action": "seat head-stack", "neutral_events": [], "standard": "MODAPTS"}
+    clf = _Clf()
+    blocked = C.run("seat a head-stack with a tight fit", None, clf, config=None,
+                    plan_fn=lambda t, p, c, history=None: {"steps": [{"tool": "classify", "text": t}], "note": ""})
+    assert blocked.get("clarify"), "a sensing block must now be resumable"
+    assert "no such check" in blocked["answer"], "the block question should be two-sided"
+    resolved = C.run(blocked["clarify"]["text"], None, clf, config=None,
+                     clarification={"question": blocked["clarify"]["question"],
+                                    "answer": "there's no integrity check, just seat it tightly"})
+    assert not resolved.get("clarify") and "2.451" in resolved["answer"], resolved["answer"]
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
@@ -435,7 +462,7 @@ if __name__ == "__main__":
                t_op_strip, t_sweep_sidequestions, t_conductor_sweep_full, t_feedback,
                t_fewshot, t_no_por, t_clarify_loop, t_history_passthrough,
                t_learn_step, t_code_edit_step, t_sensitivity_explicit,
-               t_derivation, t_sensitivity_fidelity, t_explain):
+               t_derivation, t_sensitivity_fidelity, t_explain, t_sensing_resumable):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)

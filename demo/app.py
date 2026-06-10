@@ -2,7 +2,7 @@
 Agentic digital-twin demo — Streamlit app (LLM-only, multi-tool, POR-driven).
 
 Inputs are two: free text (a typed operation or question) and a POR document
-(.xlsx or .pdf) the operator uploads. The text + POR go to the LLM coordinator
+(.xlsx or .pdf) the user uploads. The text + POR go to the LLM coordinator
 (demo_core/planner.py), which emits an ORDERED plan over the live tools; the
 conductor (demo_core/conductor.py) runs the steps, threads results between them,
 and returns one answer + the flow. The right panel always shows the branched
@@ -60,7 +60,7 @@ def _history_text(n: int = 6) -> str:
     lines = []
     for m in st.session_state.get("messages", [])[-n:]:
         if m.get("role") == "user":
-            lines.append("operator: " + str(m.get("content", "")))
+            lines.append("user: " + str(m.get("content", "")))
         else:
             lines.append("assistant: " + str(m.get("answer", "")))
     return "\n".join(lines)
@@ -137,7 +137,7 @@ def _run(command: str):
     last_deriv = last_c.get("steps") if last_c else None
     pend = st.session_state.pop("pending_clarification", None)
     if pend:
-        # The operator is answering a prior 'needs clarification' — thread it into a single
+        # The user is answering a prior 'needs clarification' — thread it into a single
         # re-measure of the SAME operation, rather than re-planning the reply as a new command.
         result = C.run(pend["text"], por, classifier, config, standard=pend["standard"],
                        clarification={"question": pend["question"], "answer": command})
@@ -171,7 +171,20 @@ with st.sidebar:
                        "strings move fast — verify against the provider's current list.")
     _cfg, _model = _make_config()
     if _cfg is not None:
-        st.success(f"Live · {prov} · `{_model}`")
+        import hashlib
+        from modapts.adapter import validate_config as _validate
+        _sig = hashlib.sha256(
+            f"{prov}|{_model}|{st.session_state.get('user_api_key', '')}".encode()).hexdigest()
+        _kc = st.session_state.get("key_check") or {}
+        if _kc.get("sig") != _sig:            # re-check only when provider/model/key changes
+            with st.spinner("Checking key…"):
+                _ok, _msg = _validate(_cfg)
+            _kc = {"sig": _sig, "ok": _ok, "msg": _msg}
+            st.session_state["key_check"] = _kc
+        if _kc["ok"]:
+            st.success(f"✓ {_kc['msg']}")
+        else:
+            st.error(f"✗ {_kc['msg']}")
     else:
         st.error("Enter a key to run (no keyless mode).")
 
@@ -195,8 +208,8 @@ with st.sidebar:
             st.session_state["por"] = por
             st.session_state["por_source"] = up.name
             st.session_state["por_uploaded_name"] = up.name
-            st.success(f"Loaded {up.name}: {len(por.lines)} lines, "
-                       f"{len(por.all_stations())} stations")
+            st.success(f"Loaded **{up.name}** — {len(por.lines)} lines, "
+                       f"{len(por.all_stations())} stations. Brief on the right →")
         except Exception as e:
             st.error(f"Couldn't parse {up.name}: {e}")
     # No silent default: the bundled sample is opt-in, so "nothing uploaded" reads honestly.
@@ -230,15 +243,22 @@ with left:
         st.caption("🔴 No key — enter a provider key in the sidebar to run.")
 
     if por:
-        with st.expander("Plant (from the POR)", expanded=False):
-            prog = ", ".join(f"{k}: {v['value']} {v.get('units') or ''}".strip()
-                             for k, v in summary["program"].items())
-            if prog:
-                st.caption("Program — " + prog)
+        with st.expander(f"What I read from this POR — {st.session_state.get('por_source','')}",
+                         expanded=True):
+            prog = " · ".join(f"{k}: {v['value']} {v.get('units') or ''}".strip()
+                              for k, v in summary["program"].items())
+            st.markdown(
+                f"**{summary['lines']} lines · {summary['stations']} stations · "
+                f"{summary['activities']} activities ({summary['manual_activities']} manual — "
+                f"the MODAPTS-measurable ones)**"
+                + (f"  \nProgram — {prog}" if prog else ""))
             for ld in summary["line_detail"]:
-                st.caption(f"**{ld['line']}** · {ld['stations']} stations · target "
-                           f"{ld['target_throughput']} {ld['throughput_unit']} · bottleneck "
-                           f"{ld['bottleneck']} @ {ld['bottleneck_ct_s']}s")
+                st.caption(f"**{ld['line']}** ({ld.get('process', '')}) · {ld['stations']} stations "
+                           f"· target {ld['target_throughput']} {ld['throughput_unit']} · "
+                           f"bottleneck {ld['bottleneck']} @ {ld['bottleneck_ct_s']}s")
+            st.caption(f"_Source: {summary.get('provenance', 'POR document')}. The sheet carries "
+                       f"no per-field provenance, so every value is tagged to the document — "
+                       f"check the lines above match your plant before asking._")
     else:
         st.info("No POR loaded — upload a `.xlsx`/`.pdf` (or load the built-in sample) in the "
                 "sidebar to analyse lines. You can still measure operations and run sensitivity "

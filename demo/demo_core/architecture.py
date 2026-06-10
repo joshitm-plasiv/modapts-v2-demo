@@ -2,7 +2,7 @@
 Architecture panel — data spine (no Streamlit here).
 
 Defines the inspectable architecture as a node graph with three drill levels:
-  L0  operator · chatbot · governance · task layer · memory · outputs
+  L0  user · chatbot · governance · task layer · memory · outputs
   L1  drill into governance -> its 6 agents; drill into task -> the 3 task agents;
       drill into memory   -> the 4 levels
   L2  drill into the classifier -> brain / engines / validator / dictionary;
@@ -19,7 +19,7 @@ from __future__ import annotations
 # node_id -> {label, parent, kind, real, summary}
 NODES: dict[str, dict] = {
     # ── L0 ──
-    "operator":  {"label": "Operator", "parent": None, "kind": "io", "real": True,
+    "user":  {"label": "User", "parent": None, "kind": "io", "real": True,
                   "summary": "Supplies the command (and the POR). Receives the answer; can drill in."},
     "chatbot":   {"label": "Chatbot (LLM)", "parent": None, "kind": "io", "real": True,
                   "summary": "Interprets intent, decomposes into task packages, presents results."},
@@ -100,8 +100,8 @@ NODES: dict[str, dict] = {
 # L0 flow edges. Input flows DOWN; results flow UP through the action layer to the
 # chatbot. The action layer (outputs) is terminal — it is never on the input path.
 L0_EDGES = [
-    ("operator", "chatbot"), ("chatbot", "gov"), ("gov", "task"), ("task", "gov"),
-    ("gov", "outputs"), ("outputs", "chatbot"), ("chatbot", "operator"),
+    ("user", "chatbot"), ("chatbot", "gov"), ("gov", "task"), ("task", "gov"),
+    ("gov", "outputs"), ("outputs", "chatbot"), ("chatbot", "user"),
     ("gov", "memory"), ("task", "memory"),
 ]
 
@@ -182,7 +182,7 @@ def breadcrumb(node_id: str) -> list[str]:
 # A block is an agent only where judgment lives; exact jobs stay tools.
 _AGENT_NODES = {"chatbot", "gov.coordinator", "gov.consistency",
                 "task.classifier", "task.classifier.brain"}
-_INTERFACE_NODES = {"operator"}
+_INTERFACE_NODES = {"user"}
 # Real, deterministic, but has a child node — should read as a tool, not a group.
 _DETERMINISTIC_TOOLS = {"task.balancer"}
 

@@ -3,7 +3,7 @@ LLM-judge — checks ONLY the LLM-produced artifacts.
 
 Scope (deliberately narrow):
   - interpretation faithfulness: does the plain-language interpreted_action +
-    neutral facts actually reflect the operator's text, without inventing steps?
+    neutral facts actually reflect the user's text, without inventing steps?
   - recommendation phrasing: is the final recommendation supported by the numbers
     and free of overstatement?
 
@@ -20,7 +20,7 @@ import json
 from typing import Any, Optional
 
 _JUDGE_SYS = (
-    "You are a verification judge. You are given an operator's task description and a "
+    "You are a verification judge. You are given an user's task description and a "
     "system's plain-language INTERPRETATION of it (plus the neutral physical facts the "
     "system extracted). Decide ONLY whether the interpretation faithfully reflects the "
     "text without inventing actions the text does not support. Do NOT comment on any "

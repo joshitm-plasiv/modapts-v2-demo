@@ -83,7 +83,7 @@ def _elabel(x, y, t) -> str:
 
 # Map a fine activation id (e.g. task.classifier, gov.coordinator, judge) to its L0 node,
 # so the high-level chips light up for whichever branch actually ran.
-_L0_OF = {"operator": "operator", "chatbot": "chatbot", "outputs": "outputs",
+_L0_OF = {"user": "user", "chatbot": "chatbot", "outputs": "outputs",
           "memory": "memory", "gov.coordinator": "gov", "gov.consistency": "gov",
           "judge": "gov", "task.classifier": "task", "task.balancer": "task",
           "task.des": "task"}
@@ -99,7 +99,7 @@ def _flow_to_l0(activations) -> set:
 def _flow_edge(x1, y1, x2, y2, begin: float, dur: float = 0.5) -> str:
     """Animated dashed overlay: marching dashes from (x1,y1)→(x2,y2) read as data flowing
     in that direction. Down-spine edges pass top→bottom coords; up-spine edges pass
-    bottom→top, so the result visibly climbs back to the operator."""
+    bottom→top, so the result visibly climbs back to the user."""
     return (f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" stroke="{_ACTIVE}" '
             f'stroke-width="2.6" stroke-dasharray="7 7" stroke-linecap="round" opacity="0.9">'
             f'<animate attributeName="stroke-dashoffset" from="14" to="0" dur="{dur}s" '
@@ -115,14 +115,14 @@ def _glow(cx: float, cy: float, label: str, begin: float) -> str:
 
 
 def _l0_svg(activations, animate: bool = False) -> str:
-    """Top-level view (always shown): a central spine (operator → chatbot → governance →
+    """Top-level view (always shown): a central spine (user → chatbot → governance →
     task) with data flowing BOTH ways — request down, result up — so every node shows an
     incoming and an outgoing arrow. Memory is a dashed shared store on the right; the
     action layer (work orders / alerts) is a deliverable branch on the left. Branched, not
     one line. When a command has run, the path animates: the request descends the spine
     into the tools, a deliverable peels off to the action layer, and the result climbs
-    back up the spine to the operator."""
-    pos = {"operator": (280, 34), "chatbot": (280, 108), "gov": (280, 206),
+    back up the spine to the user."""
+    pos = {"user": (280, 34), "chatbot": (280, 108), "gov": (280, 206),
            "task": (280, 300), "memory": (462, 253), "outputs": (112, 150)}
     active = _flow_to_l0(activations)
     p = [_MARKER,
@@ -145,12 +145,12 @@ def _l0_svg(activations, animate: bool = False) -> str:
         # a deliverable peels off to the action layer
         if "outputs" in active:
             p += [_flow_edge(238, 206, 150, 158, 1.3)]
-        # UP — the result climbs back to the operator (reversed coords = upward dashes)
+        # UP — the result climbs back to the user (reversed coords = upward dashes)
         p += [_flow_edge(280, 282, 280, 225, 1.8), _flow_edge(280, 190, 280, 127, 2.3),
               _flow_edge(280, 90, 280, 52, 2.8)]
     # node glows: light on the way down, then again on the way back up
-    down_b = {"operator": 0.0, "chatbot": 0.5, "gov": 1.0, "task": 1.5, "outputs": 1.3, "memory": 1.1}
-    up_b = {"gov": 2.1, "chatbot": 2.6, "operator": 3.0}
+    down_b = {"user": 0.0, "chatbot": 0.5, "gov": 1.0, "task": 1.5, "outputs": 1.3, "memory": 1.1}
+    up_b = {"gov": 2.1, "chatbot": 2.6, "user": 3.0}
     for nid, (cx, cy) in pos.items():
         base = _color(nid, [])                       # base/seam colour, ignoring activation
         fill = _ACTIVE if (animate and nid in active) else base

@@ -19,6 +19,42 @@ from demo_core.planner import make_plan
 from demo_core.balancer import analyse_line, format_balance
 from demo_core import judge as J
 from modapts.core.neutral import InterpretedAction as _IA
+from modapts.validator import validate_step, compute_time, build_code_sequence
+
+
+def _price_code(code_str: str) -> dict:
+    """Validate and PRICE a user-dictated MODAPTS code so a code edit shows its time, not
+    just a recorded string. Each token is checked against the dictionary (existing validator):
+    a valid token is priced; an off-standard one is mapped to the nearest with a flag; an
+    unrecognized one is flagged and NOT fabricated (priced as 0, blocks recording). Time is
+    sum(MODs) x 0.129 s. Returns the per-token breakdown, total, resolved code, and flags."""
+    tokens = [t for t in re.split(r"[+\s,]+", (code_str or "").strip().upper()) if t]
+    steps, flags, unknown = [], [], False
+    for tok in tokens:
+        vs = validate_step({"code": tok, "motion": ""})
+        note = vs.get("assumption")
+        if vs["code"] is None:
+            unknown = True
+            flags.append(f"`{tok}` isn't in the MODAPTS dictionary — I can't price it"
+                         + (f" ({note})" if note else "") + ".")
+        elif vs["code"] != tok:
+            flags.append(f"`{tok}` isn't a standard code; pricing it as **{vs['code']}**"
+                         + (f" — {note}" if note else "") + ".")
+        steps.append({"given": tok, "code": vs["code"], "mods": vs["mods"] or 0})
+    total_mods, total_s = compute_time(steps)
+    resolved = build_code_sequence(steps)
+    return {"steps": steps, "total_mods": total_mods, "total_seconds": total_s,
+            "resolved": resolved, "flags": flags, "ok": not unknown and bool(steps)}
+
+
+def _code_edit_md(priced: dict) -> str:
+    """Per-token table for a priced code edit: token | MOD | seconds."""
+    rows = []
+    for st in priced["steps"]:
+        shown = st["code"] or f"{st['given']} (unknown)"
+        rows.append(f"| {shown} | {st['mods']:g} | {round(st['mods'] * 0.129, 3):g} |")
+    return ("| code | MOD | seconds |\n|---|---|---|\n" + "\n".join(rows))
+
 
 
 def _derivation_md(steps: list[dict]) -> str:
@@ -85,10 +121,10 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
         standard: str = "MODAPTS", clarification: dict | None = None,
         history: str | None = None, last_interpretation: dict | None = None,
         last_derivation: list | None = None) -> dict:
-    """Run one operator request end-to-end. Returns
+    """Run one user request end-to-end. Returns
     {answer, recommendation, trace, activations, flow, artifacts, plan, clarify, corrections}.
     `clarification` ({question, answer}) forces a single re-measure of `text` with the
-    operator's answer threaded in. `history` is a compact transcript of recent turns, passed
+    user's answer threaded in. `history` is a compact transcript of recent turns, passed
     to the planner so follow-ups and corrections resolve against the operation under discussion."""
     trace: list[dict] = []
     flow: list[str] = []          # ordered node sequence for the animation (repeats kept)
@@ -107,7 +143,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
         if node not in activations:
             activations.append(node)
 
-    step("operator", "operator", "request", text)
+    step("user", "user", "request", text)
     step("chatbot", "chatbot (agent)", "receive", "interpret + decompose into a plan")
 
     if clarification:
@@ -136,14 +172,18 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
             step_results.append({"tool": tool, "text": s["text"], "result": res})
             if res.get("needs_clarification"):
                 qs = " ".join(res.get("clarifying_questions", []))
-                lead = ("I can't measure that as a single operation. " if res.get("plausibility_block")
-                        else "I need one clarification first: ")
+                if res.get("plausibility_block"):
+                    lead = "I can't measure that as a single operation yet. "
+                    qs = qs + (" — or tell me there's no such check (it's a plain tight fit, or "
+                               "the property is known in advance) and I'll code the motions.")
+                else:
+                    lead = "I need one clarification first: "
                 sections.append(lead + qs)
                 step(node, "classifier (agent)", "blocked", "clarification needed")
                 feed = s.get("feeds") or s.get("station_id")
                 if feed:
                     pending_feeds[feed] = qs
-                elif not res.get("plausibility_block"):
+                else:                              # resumable — including plausibility/sensing blocks
                     clarify_ctx = {"text": s["text"], "question": qs,
                                    "standard": res.get("standard", standard)}
             else:
@@ -269,13 +309,36 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
 
         elif tool == "code_edit":
             try:
-                classifier.add_example(s["text"], s["code"], standard=standard, kind="code_edit")
-                sections.append(f"Recorded your code for this operation: **{s['code']}** — fed "
-                                f"back to the interpreter as a teaching example this session.")
-                corrections.append(f"code: '{s['text'][:40]}…' → {s['code']}")
-                step("memory", "memory (store)", "code edit", s["code"])
+                priced = _price_code(s["code"])
+                shown_code = priced["resolved"] or s["code"]
+                sections.append(
+                    f"Your code **{shown_code}** = {priced['total_mods']:g} MOD = "
+                    f"**{priced['total_seconds']:g} s** (1 MOD = 0.129 s).")
+                sections.append(_code_edit_md(priced))
+                for fl in priced["flags"]:
+                    sections.append("⚠️ " + fl)
+                if priced["ok"]:
+                    classifier.add_example(s["text"], priced["resolved"],
+                                           standard=standard, kind="code_edit")
+                    sections.append(
+                        "Recorded for this session as a teaching example. This prices the "
+                        "tokens straight from the standard table; it does **not** re-check the "
+                        "physical motion, because a bare code drops the distances and what's "
+                        "sensed — for a physically-validated time, correct the facts instead "
+                        "(e.g. *the reach is 20 cm*, *the fit is tight*).")
+                    corrections.append(
+                        f"code: '{s['text'][:40]}…' → {priced['resolved']} "
+                        f"({priced['total_seconds']:g}s)")
+                    step("memory", "memory (store)", "code edit",
+                         f"{priced['resolved']} = {priced['total_seconds']:g}s")
+                else:
+                    sections.append(
+                        "I didn't record this — it has a token that isn't in the MODAPTS "
+                        "dictionary. Fix that token and I'll price and record it.")
+                    step("task.classifier", "classifier (agent)", "code edit",
+                         "not recorded: unknown token")
             except Exception as e:
-                sections.append(f"Couldn't record the code edit: {e}")
+                sections.append(f"Couldn't process the code edit: {e}")
 
         elif tool == "explain":
             if last_derivation:
@@ -295,7 +358,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                         "sweep, or note the DES seam for plant throughput.")
 
     step("outputs", "packaging (tool)", "deliver", "answer + trace")
-    step("chatbot", "chatbot (agent)", "present", "answer to operator")
+    step("chatbot", "chatbot (agent)", "present", "answer to user")
 
     artifacts["steps"] = step_results
     answer = "\n\n".join(sections) if sections else "—"
