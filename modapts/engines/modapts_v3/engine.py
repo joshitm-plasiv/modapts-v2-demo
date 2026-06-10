@@ -83,8 +83,8 @@ class MODAPTSEngine:
 
     def _grasp_code(self, ev: NeutralEvent) -> tuple[str, Optional[str]]:
         s, size = ev.source_state, ev.object_size
-        if s == SourceState.JUMBLED or size == "tiny":
-            return "G3", "tiny/jumbled -> complex grasp (G3)"
+        if s in (SourceState.JUMBLED, SourceState.NESTED) or size == "tiny":
+            return "G3", "tiny/jumbled/nested -> complex grasp, requires select/separate (G3)"
         if s == SourceState.NA and size is None:
             return "G1", "grasp unspecified; assumed simple close (G1)"
         return "G1", None
