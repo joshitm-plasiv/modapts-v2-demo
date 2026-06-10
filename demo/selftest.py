@@ -604,6 +604,52 @@ def t_station_resolution_robust():
     assert ct != 40.5, ct          # resolved SMT-05 from the command, ignored the line-name
 
 
+@check("no clarification loop: a structured put resolves motion_path (free-air) so 'move' isn't re-asked")
+def t_no_motion_path_loop():
+    from modapts.core.structured import expand_steps
+    from modapts import orchestrator as O
+    events, _ = expand_steps([
+        {"op": "get", "object": "component", "distance_cm": 20, "source_state": "jumbled"},
+        {"op": "put", "object": "component", "distance_cm": 20, "placement_accuracy": "loose"}])
+    act = IA(interpreted_action="reach; move; press", needs_clarification=False,
+             clarifying_questions=[], events=events)
+    text = "Reach to bin 20 cm, grasp component, move it to the PCB and press it in (loose)"
+    qs = O.pending_clarifications(text, act)
+    assert not any("free through the air" in q for q in qs), qs
+
+
+@check("loop-breaker: an already-clarified measure completes on resume instead of re-asking")
+def t_force_resolve_breaks_loop():
+    def m(text, config=None, clarification=None):
+        # an interpretation that always wants clarification (a sensing dependency)
+        return IA.from_dict({"interpreted_action": "place the hot part",
+            "events": [{"event_type": "acquire", "object": "part", "distance_cm": 20,
+                        "source_state": "by_itself"},
+                       {"event_type": "place", "object": "part", "distance_cm": 20,
+                        "placement_accuracy": "loose", "sensing_dependency": "temperature"}]})
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    r1 = clf.run({"text": "check if the part is hot then place it", "standard": "MODAPTS"})
+    assert r1["needs_clarification"], "first pass should ask"
+    r2 = clf.run({"text": "check if the part is hot then place it", "standard": "MODAPTS",
+                  "force_resolve": True,
+                  "clarification": {"question": "how is hot determined?", "answer": "by touch"}})
+    assert not r2["needs_clarification"] and r2.get("code_sequence"), r2
+
+
+@check("sensing word with no dependency set does not trigger a clarification (no false loop)")
+def t_sensing_word_no_false_clarify():
+    from modapts.core.structured import expand_steps
+    from modapts import orchestrator as O
+    events, _ = expand_steps([{"op": "get", "object": "part", "distance_cm": 20,
+                               "source_state": "by_itself"},
+                              {"op": "put", "object": "part", "distance_cm": 20,
+                               "placement_accuracy": "loose"}])
+    act = IA(interpreted_action="place the hot part", needs_clarification=False,
+             clarifying_questions=[], events=events)
+    qs = O.pending_clarifications("place the hot part on the jig", act)
+    assert not any("hot" in q for q in qs), qs
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
@@ -614,7 +660,8 @@ if __name__ == "__main__":
                t_learn_step, t_code_edit_step, t_sensitivity_explicit,
                t_derivation, t_sensitivity_fidelity, t_explain, t_sensing_resumable,
                t_structured, t_feed_resume, t_autolink_feed, t_sweep_assumptions_gated,
-               t_station_resolution_robust):
+               t_station_resolution_robust, t_no_motion_path_loop,
+               t_force_resolve_breaks_loop, t_sensing_word_no_false_clarify):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)

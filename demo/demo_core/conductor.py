@@ -194,7 +194,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
 
     if clarification:
         steps = [{"tool": "classify", "text": text,
-                  "station_id": clarification.get("station_id")}]
+                  "station_id": clarification.get("station_id"), "force_resolve": True}]
         if clarification.get("line"):     # re-thread the new time into the dependent line
             steps.append({"tool": "line_balance", "line": clarification["line"]})
         plan = {"steps": steps, "note": "clarified re-measure"}
@@ -218,6 +218,8 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                    "station_id": s.get("station_id"), "standard": standard}
             if clarification:
                 pkg["clarification"] = clarification
+            if s.get("force_resolve"):
+                pkg["force_resolve"] = True
             res = classifier.run(pkg)
             step_results.append({"tool": tool, "text": s["text"], "result": res})
             # link this measure to a REAL station, robust to a planner that mis-fills the
@@ -261,6 +263,10 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                     + (f", {tag}" if tag else "") + f"). Interpreted: {res['interpreted_action']}.{ref}")
                 if res.get("steps"):
                     sections.append(_derivation_md(res["steps"]))
+                if res.get("forced_defaults"):
+                    sections.append("_Already clarified once — proceeded with sensible "
+                                    "defaults rather than re-asking: "
+                                    + "; ".join(res["forced_defaults"]) + "._")
                 recommendation = recommendation or f"Use {res['total_seconds']} s as the activity time."
                 step(node, "classifier (agent)", "measure", res["code_sequence"])
                 if config is not None:
