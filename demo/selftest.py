@@ -527,6 +527,61 @@ def t_feed_resume():
     assert ct == meas and ct != 40.5, (ct, meas)
 
 
+@check("feed threading: a re-measure auto-links to a station named in the text (planner-independent)")
+def t_autolink_feed():
+    def m(text, config=None, clarification=None):
+        return IA.from_dict({"interpreted_action": "grab component and press",
+            "events": [{"event_type": "acquire", "object": "component", "distance_cm": 20,
+                        "source_state": "jumbled"},
+                       {"event_type": "place", "object": "component", "distance_cm": 20,
+                        "placement_accuracy": "loose"}]})
+    por = load_por_xlsx(SAMPLE)
+    clf = make_classifier(memory=SessionMemoryAdapter(), interpret_fn=m)
+    # planner sets NO station_id/feeds — only the command text names SMT-05
+    plan = lambda t, p, c: {"steps": [
+        {"tool": "classify", "text": "replaced the insert at SMT-05; grab the component and press it in"},
+        {"tool": "line_balance", "line": "PCB Stuffing Assembly"}], "note": ""}
+    bal = [r for r in C.run("x", por, clf, config=None, plan_fn=plan)["artifacts"]["steps"]
+           if r["tool"] == "line_balance"][0]["result"]
+    ct = next(s["cycle_time_s"] for s in bal["stations"] if s["station_id"] == "SMT-05")
+    assert ct != 40.5, ct                                  # auto-linked from text -> threaded
+
+    # a command naming no station must NOT auto-link (no false positive)
+    plan2 = lambda t, p, c: {"steps": [
+        {"tool": "classify", "text": "grab a widget from a tray and press it in"},
+        {"tool": "line_balance", "line": "PCB Stuffing Assembly"}], "note": ""}
+    bal2 = [r for r in C.run("x", por, clf, config=None, plan_fn=plan2)["artifacts"]["steps"]
+            if r["tool"] == "line_balance"][0]["result"]
+    assert next(s["cycle_time_s"] for s in bal2["stations"] if s["station_id"] == "SMT-05") == 40.5
+
+
+@check("sweep transparency: base assumptions show only when the sweep reused the on-screen op")
+def t_sweep_assumptions_gated():
+    NOTE = "Assumed in the base operation"
+    por = load_por_xlsx(SAMPLE)
+    last = {"interpreted_action": "seat head-stack into actuator",
+            "events": [{"event_type": "place", "object": "head-stack",
+                        "assumption": "transport inferred ~30 cm to actuator"}]}
+
+    class _SweepClf:
+        def sweep(self, op, ei, field, values, standard="MODAPTS", interpret_fn=None):
+            return {"rows": [{"value": v, "code_sequence": "M4+P2", "total_native": 6,
+                              "total_seconds": 0.774, "baseline": (v == "tight"), "unit": "MOD"}
+                             for v in values],
+                    "field": field, "interpreted_action": op, "standard": standard}
+
+    fresh = lambda t, p, c: {"steps": [{"tool": "sensitivity",
+        "text": "pick a screw and insert into connector", "field": "placement_accuracy",
+        "values": ["approximate", "loose", "tight"], "target": "new"}], "note": ""}
+    o1 = C.run("x", por, _SweepClf(), config=None, plan_fn=fresh, last_interpretation=last)
+    assert NOTE not in o1["answer"], "fresh-text sweep must not borrow the prior op's assumptions"
+
+    reuse = lambda t, p, c: {"steps": [{"tool": "sensitivity", "field": "placement_accuracy",
+        "values": ["approximate", "loose", "tight"]}], "note": ""}
+    o2 = C.run("x", por, _SweepClf(), config=None, plan_fn=reuse, last_interpretation=last)
+    assert NOTE in o2["answer"], "reuse sweep should surface the base assumptions"
+
+
 if __name__ == "__main__":
     print("Self-test (LLM-only; mock planner + mock interpreter as test doubles)\n")
     for fn in (t_parse, t_balance, t_override, t_conductor_thread, t_conductor_empty,
@@ -536,7 +591,7 @@ if __name__ == "__main__":
                t_fewshot, t_no_por, t_clarify_loop, t_history_passthrough,
                t_learn_step, t_code_edit_step, t_sensitivity_explicit,
                t_derivation, t_sensitivity_fidelity, t_explain, t_sensing_resumable,
-               t_structured, t_feed_resume):
+               t_structured, t_feed_resume, t_autolink_feed, t_sweep_assumptions_gated):
         fn()
     print(f"\n{_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)

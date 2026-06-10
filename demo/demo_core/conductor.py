@@ -22,6 +22,24 @@ from modapts.core.neutral import InterpretedAction as _IA
 from modapts.validator import validate_step, compute_time, build_code_sequence
 
 
+def _station_in_text(text: str, por) -> Optional[str]:
+    """Find a station id from the POR that is named in the command text, so a re-measure
+    can be linked to its station even when the planner doesn't set station_id/feeds. Matches
+    a whole token (not a substring), longest id first, case-insensitively. Returns None if
+    none is found or there is no POR."""
+    if not text or por is None:
+        return None
+    try:
+        ids = {s.station_id for s in por.all_stations() if s.station_id}
+    except Exception:
+        return None
+    for sid in sorted(ids, key=len, reverse=True):
+        if re.search(r"(?<![A-Za-z0-9])" + re.escape(sid) + r"(?![A-Za-z0-9])",
+                     text, re.IGNORECASE):
+            return sid
+    return None
+
+
 def _price_code(code_str: str) -> dict:
     """Validate and PRICE a user-dictated MODAPTS code so a code edit shows its time, not
     just a recorded string. Each token is checked against the dictionary (existing validator):
@@ -174,6 +192,10 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                 pkg["clarification"] = clarification
             res = classifier.run(pkg)
             step_results.append({"tool": tool, "text": s["text"], "result": res})
+            # link this measure to a station even when the planner didn't: explicit
+            # feeds/station_id first, else a station id named in the command text
+            station = (s.get("feeds") or s.get("station_id")
+                       or _station_in_text(s.get("text", ""), por))
             if res.get("needs_clarification"):
                 qs = " ".join(res.get("clarifying_questions", []))
                 if res.get("plausibility_block"):
@@ -184,7 +206,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                     lead = "I need one clarification first: "
                 sections.append(lead + qs)
                 step(node, "classifier (agent)", "blocked", "clarification needed")
-                feed = s.get("feeds") or s.get("station_id")
+                feed = station
                 clarify_ctx = {"text": s["text"], "question": qs,
                                "standard": res.get("standard", standard)}
                 if feed:
@@ -204,7 +226,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                     eng = res["cross_check"]["engines"]
                     ref = " | ref: " + ", ".join(f"{k} {d['total_seconds']}s"
                                                   for k, d in eng.items() if not d["authoritative"])
-                tag = s.get("station_id")
+                tag = station
                 sections.append(
                     f"**{res['code_sequence']} = {res['total_native']} {res['unit']} = "
                     f"{res['total_seconds']} s** ({res.get('standard', standard)}"
@@ -217,7 +239,7 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                     j = J.judge_interpretation(s["text"], res["interpreted_action"],
                                                res.get("neutral_events"), config=config)
                     step("judge", "judge (LLM verifier)", "attest", j["verdict"])
-                feed = s.get("feeds") or s.get("station_id")
+                feed = station
                 if feed:
                     remeasured[feed] = res["total_seconds"]
 
@@ -301,10 +323,12 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                     sections.append("_Placement fit → P-class (a convention): approximate → P0 "
                                     "(no positioning) · loose → P2 · tight → P5; E2 precedes "
                                     "P2/P5. Reach and grasp are held constant._")
-                # surface what the base operation assumed, so the sweep's held-constant facts
-                # aren't silent (the gap the single-classify derivation otherwise closes)
+                # surface what the base operation assumed, so the sweep's held-constant
+                # facts aren't silent — but ONLY when the sweep actually reused the
+                # on-screen interpretation (ifn set). For a freshly-interpreted sweep,
+                # last_interpretation is a DIFFERENT operation, so showing it would mislabel.
                 assumed = []
-                if isinstance(last_interpretation, dict):
+                if ifn is not None and isinstance(last_interpretation, dict):
                     for ev in last_interpretation.get("events", []):
                         a = ev.get("assumption")
                         if a:
