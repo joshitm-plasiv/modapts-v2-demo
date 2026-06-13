@@ -34,6 +34,32 @@ MOD_TO_SECONDS = 0.129
 _NOMINAL_CM = {"M1": 2.5, "M2": 5, "M3": 15, "M4": 30, "M5": 45}
 
 
+def methodology_card() -> str:
+    """The deterministic rules the engine applies, as grounding for the reasoning layer.
+    Built from this module's own constants so it cannot drift from what is computed."""
+    return (
+        "MODAPTS METHODOLOGY — the deterministic rules the engine applies. Reason from "
+        "THIS, not from memory of MODAPTS numbers.\n"
+        f"- Time base (standard): 1 MOD = {MOD_TO_SECONDS} s. total_seconds = MODs x {MOD_TO_SECONDS}.\n"
+        "- Move/reach distance -> M-class. CONVENTION (this engine): banded by UPPER bound — "
+        f"<=2.5 cm M1 · <=5 M2 · <=15 M3 · <=30 M4 · <=45 M5 · >45 M7 (no M6). Nominal "
+        f"(mid) distances: M1 {_NOMINAL_CM['M1']} · M2 {_NOMINAL_CM['M2']} · M3 {_NOMINAL_CM['M3']} "
+        f"· M4 {_NOMINAL_CM['M4']} · M5 {_NOMINAL_CM['M5']} cm. Nearest-nominal (the alternative "
+        "convention) differs only around 16–22 cm (M3 vs M4) and 31–37 cm (M4 vs M5).\n"
+        "- Grasp (Get) -> G-class: by-itself G1 (simple); jumbled / nested / tiny G3 (complex, "
+        "requires select/separate).\n"
+        "- Place (Put) -> P-class: approximate P0 (no positioning) · loose P2 · tight P5. Fit "
+        "not stated -> assumed loose (P2), flagged.\n"
+        "- Eye fixation E2 (Rule 3): one E2 (2 MOD) is charged immediately BEFORE a high-control "
+        f"terminal — {', '.join(sorted(HIGH_CONSCIOUS_CONTROL))} — and only those.\n"
+        "- A PUT is one transport move + one placement (move folded into the place); a bare MOVE "
+        "is the move element only.\n"
+        "- Code->MOD values come from the standard MODAPTS dictionary (fixed); the engine never "
+        "invents a value. The UPPER-bound banding is the one convention choice; the rest is the "
+        "standard."
+    )
+
+
 class MODAPTSEngine:
     standard = "MODAPTS"
     unit = "MOD"
