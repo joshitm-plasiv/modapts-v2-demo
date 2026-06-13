@@ -20,6 +20,61 @@ from demo_core.balancer import analyse_line, format_balance
 from demo_core import judge as J
 from modapts.core.neutral import InterpretedAction as _IA
 from modapts.validator import validate_step, compute_time, build_code_sequence
+from modapts.adapter import call_llm
+from modapts.engines.modapts_v3.engine import methodology_card
+
+
+_REASON_SYS = (
+    "You are the reasoning analyst for a MODAPTS work-measurement assistant. Answer the "
+    "user's question with real depth — like an expert industrial engineer thinking it "
+    "through. Reason step by step, compare alternatives, and DISAGREE with the user's "
+    "premise when the facts don't support it (say so plainly and correct it).\n"
+    "GROUND every claim in the material provided — the methodology, the last derivation, "
+    "the interpreted operation, the POR. Do NOT use your own memory of MODAPTS numbers; the "
+    "methodology card is the source of truth. If something isn't in the material, say you "
+    "don't have it rather than inventing it.\n"
+    "HARD RULE: codes and times are computed deterministically from the dictionary and the "
+    "methodology. You explain, compare and critique them — you NEVER recompute them or give "
+    "a different number as the answer. You MAY argue that a different convention would yield "
+    "a different code and recommend changing it, but the computed result stands.\n"
+    "Plain prose, precise and as deep as the question needs. No invented motions or values."
+)
+
+
+def _derivation_lines(steps: list) -> str:
+    out = []
+    for s in steps or []:
+        if not s.get("code"):
+            continue
+        line = f"  {s.get('code')}  {s.get('motion', '')} — {s.get('rule', '')}"
+        if s.get("assumption"):
+            line += f" [assumption: {s['assumption']}]"
+        out.append(line)
+    return "\n".join(out)
+
+
+def _reason(question: str, config, last_derivation, last_interpretation, por, history) -> str:
+    """Grounded free reasoning over the deterministic result + methodology + POR. Never
+    recomputes codes/times — it reasons about them."""
+    parts = ["QUESTION:\n" + (question or ""),
+             "\nMETHODOLOGY (source of truth):\n" + methodology_card()]
+    if isinstance(last_interpretation, dict) and last_interpretation.get("interpreted_action"):
+        parts.append("\nINTERPRETED OPERATION:\n" + last_interpretation["interpreted_action"])
+    if last_derivation:
+        parts.append("\nLAST DERIVATION (operation under discussion):\n"
+                     + _derivation_lines(last_derivation))
+    if por is not None:
+        try:
+            det = por.summary().get("line_detail", [])
+            parts.append("\nPOR LINES:\n" + "; ".join(
+                f"{d['line']} (bottleneck {d.get('bottleneck')} @ {d.get('bottleneck_ct_s')}s, "
+                f"target {d.get('target_throughput')}/{d.get('throughput_unit', 'day')})"
+                for d in det))
+        except Exception:
+            pass
+    if history:
+        parts.append("\nCONVERSATION SO FAR (recent):\n" + history)
+    return call_llm(_REASON_SYS, "\n".join(parts), config)
 
 
 def _station_in_text(text: str, por) -> Optional[str]:
@@ -426,7 +481,22 @@ def run(text: str, por, classifier, config: Any = None, *, plan_fn=None,
                 sections.append(f"Couldn't process the code edit: {e}")
 
         elif tool == "explain":
-            if last_derivation:
+            if config is not None:
+                # any open/analytical question -> grounded free reasoning. Codes/times are
+                # NOT recomputed here; the reasoning only talks about the deterministic result.
+                try:
+                    sections.append(_reason(text, config, last_derivation,
+                                            last_interpretation, por, history))
+                    step("task.classifier", "classifier (agent)", "reason", "open question")
+                except Exception:
+                    if last_derivation:
+                        sections.append("Here's how that code was derived — each token, what it "
+                                        "means, and what drove it:")
+                        sections.append(_derivation_md(last_derivation))
+                    else:
+                        sections.append("Measure something first and I'll break the code down.")
+                    step("task.classifier", "classifier (agent)", "explain", "derivation (reasoning unavailable)")
+            elif last_derivation:
                 sections.append("Here's how that code was derived — each token, what it means, "
                                 "and what drove it:")
                 sections.append(_derivation_md(last_derivation))
